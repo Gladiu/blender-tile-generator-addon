@@ -18,7 +18,7 @@ bl_info = {
 
 import bpy
 import math
-import time
+import random
 
 # ------------------------------------------------------------------------
 #   Combine output images
@@ -28,32 +28,19 @@ import cv2
 from pathlib import Path
 import os
 
-def combine_frames(startingFrame, inputPath):
-    frames = []
-    print(inputPath)
-    current_file = startingFrame
-    files = os.listdir(inputPath)
-    files.sort()
-    print(files)
-    #while True:
-    #    # Check how many zeroes we have to append for file name
-    #    prefix_zeroes = "0"*(4 - len(str(current_file)))
-    #    path = Path(os.path.join(inputPath, f"{prefix_zeroes}{current_file}.png"))
+def combine_frames(inputPath, prefix):
+    # Get everything that is a file and starts with prefix from inputPath
+    filepaths = []
+    for f in os.listdir(inputPath):
+        fp = os.path.join(inputPath, f)
+        if not os.path.isfile(fp) or not f.startswith(prefix):
+            continue
+        filepaths.append(fp)
+    filepaths.sort(reverse=True)
 
-    #    if path.is_file() == False:
-    #        print("Fak no file")
-    #        break
-    #    else:
-    #        print("file")
+    images = [cv2.imread(filepath, cv2.IMREAD_UNCHANGED) for filepath in filepaths]
+    return cv2.hconcat(images)
 
-    #    image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-    #    frames.append(image)
-
-    #    current_file += 1
-
-    combined = cv2.hconcat(frames)
-
-    return combined
 
 def read_image(inputPath):
     path = Path(f"{inputPath}")
@@ -63,6 +50,82 @@ def read_image(inputPath):
 
     image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     return image
+
+
+def get_render_camera(context):
+    """
+    Get camera for render. If there is any other number of cameras in the scene
+    than one return None as we can't auto determine which to use for render.
+    """
+    cameras = [ob for ob in context.scene.objects if ob.type == 'CAMERA']
+    if len(cameras) == 1:
+        return cameras[0]
+    return None
+
+
+def apply_noise(mat, obj):
+    """
+    If applicable - apply noise
+    """
+    random_int = random.randint(1, 100)
+    if "Value" in mat.node_tree.nodes:
+        mat.node_tree.nodes["Value"].outputs[0].default_value = random_int
+    for mod in obj.modifiers:
+        if mod.name == "GeometryNodes":
+            mod.node_group.nodes["Material"].material = mat
+            if "Value" in mod.node_group.nodes:
+                bpy.data.node_groups['Geometry Nodes'].nodes['Value'].outputs[0].default_value = random_int
+
+
+def render(matselcoll):
+    # Apply materials to rendered objects
+    for member in matselcoll:
+        obj = bpy.context.scene.objects[member.name]
+        mat = bpy.data.materials[member.active_index_mat]
+        obj.data.materials[0] = mat
+
+    # Get a camera - we only expect one to be present in the scene
+    camera = get_render_camera(bpy.context)
+    if None == camera:
+        return # ERROR
+    x, y = camera.location.x, camera.location.y
+    camera_vector_mag = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
+    camera.location.x = camera_vector_mag * 1 # Yes this is very verbose - sue me
+    camera.location.y = 0
+    camera.rotation_euler[2] = math.pi / 2
+    camera_rotation_angle = math.pi * 2.0 / rotations
+    for _ in range(0, EmetTool.tile_variationCount):
+        for _ in range(0,rotations):
+            # Apply noise
+            for member in matselcoll:
+                obj = bpy.context.scene.objects[member.name]
+                mat = bpy.data.materials[member.active_index_mat]
+                apply_noise(mat, obj)
+
+            # Rotate camera around Z
+            camera.rotation_euler[2] += camera_rotation_angle
+
+            # Rotate camera position vector
+            x, y = camera.location.x, camera.location.y
+            camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
+            camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
+
+            # Render Diffuse
+            bpy.ops.render.render(
+                animation=is_Animated,
+                write_still=True,
+                use_viewport=False,
+                layer='',
+                scene=''
+            )
+
+            if is_Animated:
+                current_tile = combine_frames(EmetTool.tile_outputPath, prefix)
+            else:
+                current_tile = read_image(f"{temp_path}.png")
+
+            diffuse_tiles.append(current_tile)
+    return
 
 
 class EmetAddToMatPicker(bpy.types.Operator):
@@ -156,7 +219,7 @@ class Emet_Properties(bpy.types.PropertyGroup):
         max = 25
         )
 
-    tile_isAnimated : bpy.props.BoolProperty(
+    isAnimated : bpy.props.BoolProperty(
         name = "Is Animated?",
         description="Is tile animated",
         default = False,
@@ -178,14 +241,6 @@ class Emet_Properties(bpy.types.PropertyGroup):
         subtype='DIR_PATH'
         )
 
-    tile_rotations : bpy.props.IntProperty(
-        name = "Rotations",
-        description="How many rotations around Z axis do you want to render",
-        default = 1,
-        min = 1,
-        max = 8
-        )
-
     animation_startingFrame : bpy.props.IntProperty(
         name = "First Frame",
         description="Frame on which animation starts",
@@ -202,7 +257,7 @@ class Emet_Properties(bpy.types.PropertyGroup):
         subtype='FILE_NAME'
         )
 
-    animation_rotations : bpy.props.IntProperty(
+    rotations : bpy.props.IntProperty(
         name = "Rotations",
         description="How many rotations around Z axis do you want to render",
         default = 8,
@@ -222,95 +277,129 @@ class Emet_Properties(bpy.types.PropertyGroup):
 #   Tiles Classes
 # ------------------------------------------------------------------------
 
-class Emet_Render_Tiles_Operator(bpy.types.Operator):
-    bl_idname = "emet.emet_render_tiles_operator"
-    bl_label = "Render Tiles"
-    bl_options = {'REGISTER'}
+class RendererOperator():
+    def __init__(self) -> None:
+        self.context = None
+        self.scene = None
+        self.emet_tool = None
+        self.matselcoll = None
+        self.camera = None
+        self.camera_location_cache = None
+        self.camera_rotation_cache = None
+        self.PREFIX = "tmp_tiles"
+        self.temp_path = None
+        #self.scene.render.filepath = None
+        self.render_out = []
 
-    def execute(self, context):
-        scene = context.scene
-        EmetTool = scene.EmetTool
-        MatSelColl = scene.MatSelColl
-        is_Animated = EmetTool.tile_isAnimated
-        active_object = bpy.context.active_object
-        diffuse_tiles = []
-        normal_tiles = []
-        #temp_path = os.path.join(EmetTool.animation_outputPath, "tmp")
-        temp_path = os.path.join(EmetTool.animation_outputPath)
-        rotations = EmetTool.tile_rotations
 
-        for member in MatSelColl:
+    def render(self):
+        # Prepare render temp directory
+        # TODO: This should be set to false because we **should** cleanup after ourselves
+        os.makedirs(self.emet_tool.tile_outputPath, exist_ok=True)
+
+        # Apply materials
+        for member in self.matselcoll:
             obj = bpy.context.scene.objects[member.name]
-            obj.data.materials[0] = bpy.data.materials[member.active_index_mat]
-            print(obj.data.materials[0])
+            mat = bpy.data.materials[member.active_index_mat]
+            obj.data.materials[0] = mat
 
-        cameras = [ob for ob in bpy.context.scene.objects if ob.type == 'CAMERA']
-        if len(cameras) > 1:
-            print("Whoa... how many cameras do u need partner?")
-        camera = cameras[0]
-
-        scene.render.filepath = os.path.abspath(temp_path)
-        print(scene.render.filepath)
-
-        # TODO: Cache original camera position and restore it afterwards in cleanup
-
-        # Calculate vector magnitude in x/y plane to keep proper offset from rendered object
-        # z axis is not touched so it has to be properly setup by the user
-        x, y = camera.location.x, camera.location.y
+        # Setup camera
+        x, y = self.camera.location.x, self.camera.location.y
         camera_vector_mag = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
-        camera.location.x = camera_vector_mag * 1 # Yes this is very verbose - sue me
-        camera.location.y = 0
-        camera.rotation_euler[2] = math.pi / 2
-        camera_rotation_angle = math.pi * 2.0 / rotations
-        for i in range(0, EmetTool.tile_variationCount):
-            for j in range(0,rotations):
+        self.camera.location.x = camera_vector_mag * 1 # Yes this is very verbose - sue me
+        self.camera.location.y = 0
+        self.camera.rotation_euler[2] = math.pi / 2
+        camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
+
+        # Main rendering loop
+        for _ in range(0, self.emet_tool.tile_variationCount):
+            # Apply noise in between variations
+            for member in self.matselcoll:
+                obj = bpy.context.scene.objects[member.name]
+                mat = bpy.data.materials[member.active_index_mat]
+                apply_noise(mat, obj)
+
+            # Render rotations
+            for _ in range(0, self.emet_tool.rotations):
+                # Apply noise
+
                 # Rotate camera around Z
-                camera.rotation_euler[2] += camera_rotation_angle
+                self.camera.rotation_euler[2] += camera_rotation_angle
 
                 # Rotate camera position vector
-                x, y = camera.location.x, camera.location.y
-                camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
-                camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
+                x, y = self.camera.location.x, self.camera.location.y
+                self.camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
+                self.camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
 
                 # Render Diffuse
                 bpy.ops.render.render(
-                    animation=is_Animated,
+                    animation=self.emet_tool.isAnimated,
                     write_still=True,
                     use_viewport=False,
                     layer='',
                     scene=''
                 )
-                if is_Animated:
-                    current_tile = combine_frames(1, temp_path)
+
+                if self.emet_tool.isAnimated:
+                    current_tile = combine_frames(self.emet_tool.tile_outputPath, self.PREFIX)
                 else:
-                    current_tile = read_image(f"{temp_path}.png")
+                    current_tile = read_image(f"{self.temp_path}.png")
 
-                diffuse_tiles.append(current_tile)
+                self.render_out.append(current_tile)
 
-                """
-                for obj in bpy.context.selected_objects:
-                    diffuse_mat = bpy.data.materials.get(f"Diffuse_{obj.name}")
-                    if bpy.data.materials.get(f"Diffuse_{obj.name}"):
-                        diffuse_mat = bpy.data.materials.get(f"Diffuse_{obj.name}")
-                    else:
-                        diffuse_mat = bpy.data.materials.get(f"Diffuse")
-                """
+        # TODO: Normal:
+        # https://blender.stackexchange.com/questions/191091/bake-a-texture-map-with-python/191841#191841
+        # TODO: Purge animation operator it duplicates features here
 
-                """
-                    if "Value" in diffuse_mat.node_tree.nodes:
-                        diffuse_mat.node_tree.nodes["Value"].outputs[0].default_value = i
-                    obj.data.materials[0] = diffuse_mat 
+        output = cv2.vconcat(self.render_out)
+        filepath = os.path.join(
+            self.emet_tool.tile_outputPath,
+            f"{self.emet_tool.tile_prefix}_diffuse.png"
+        )
+        filepath = os.path.abspath(filepath)
+        cv2.imwrite(filepath, output)
 
 
-                    for mod in obj.modifiers:
-                        if mod.name == "GeometryNodes":
-                            mod.node_group.nodes["Material"].material = diffuse_mat
-                            if "Value" in mod.node_group.nodes:
-                                bpy.data.node_groups['Geometry Nodes'].nodes['Value'].outputs[0].default_value = i
-                """
+    def _get_render_camera(self):
+        cameras = [ob for ob in self.context.scene.objects if ob.type == 'CAMERA']
+        if 1 != len(cameras):
+            raise ValueError("There should only be one camera in the scene.")
+        return cameras[0]
 
 
-                """
+class Emet_Render_Tiles_Operator(bpy.types.Operator, RendererOperator):
+    bl_idname = "emet.emet_render_tiles_operator"
+    bl_label = "Render Tiles"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        # Perform any necessary setup here before calling univeral function - render
+        self.context = context
+        self.scene = context.scene
+        self.emet_tool = self.scene.EmetTool
+        self.matselcoll = self.scene.MatSelColl
+        self.camera = self._get_render_camera()
+        self.camera_location_cache = self.camera.location
+        self.camera_rotation_cache = self.camera.rotation_euler # Should this be deep copied?
+        self.PREFIX = "tmp_tiles"
+        self.temp_path = os.path.abspath(os.path.join(self.emet_tool.tile_outputPath, self.PREFIX))
+        self.scene.render.filepath = os.path.abspath(self.temp_path)
+        self.render_out = []
+
+        # TODO: Do this for animation renderer
+        #cache_isanimated = self.emet_tool.isAnimated
+        #self.emet_tool.isAnimated = True
+        self.render()
+        #self.emet_tool.isAnimated = cache_isanimated
+
+        return {'FINISHED'}
+
+
+        # Calculate vector magnitude in x/y plane to keep proper offset from rendered object
+        # z axis is not touched so it has to be properly setup by the user
+        
+
+"""
                 # Render Normal
 
                 for obj in bpy.context.selected_objects:  
@@ -345,16 +434,9 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         # Write Animation Sprite
         # TODO: Check if file exists and display warning before writing, or
         # change the name so it is different
-        output = cv2.vconcat(diffuse_tiles)
-        filepath = os.path.join(
-            EmetTool.tile_outputPath,
-            f"{EmetTool.tile_prefix}_diffuse.png"
-        )
-        filepath = os.path.abspath(filepath)
-        print(os.path.abspath(filepath))
-        print(cv2.imwrite(filepath, output))
+        
 
-        """
+"""
         cv2.imwrite(filepath, output)
         output = cv2.vconcat(normal_tiles)
         cv2.imwrite(
@@ -362,8 +444,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
             output
         )"""
         # Clean up
-
-        return {'FINISHED'}
 
 class Emet_Tiles_Panel(bpy.types.Panel):
     bl_label = "Tiles"
@@ -379,8 +459,8 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         
         layout.label(text="Set active object to mesh")
         layout.prop(EmetTool, "tile_variationCount")
-        layout.prop(EmetTool, "tile_rotations")
-        layout.prop(EmetTool, "tile_isAnimated")
+        layout.prop(EmetTool, "rotations")
+        layout.prop(EmetTool, "isAnimated")
         layout.prop(EmetTool, "tile_prefix")
         layout.prop(EmetTool, "tile_outputPath")
         
@@ -467,7 +547,6 @@ class Emet_Animation_Panel(bpy.types.Panel):
         
         layout.label(text="Set active object to armature")
         layout.prop(EmetTool, "animation_startingFrame")
-        layout.prop(EmetTool, "animation_rotations")
         layout.prop(EmetTool, "animation_prefix")
         layout.prop(EmetTool, "animation_outputPath")
         
