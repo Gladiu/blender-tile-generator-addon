@@ -1,7 +1,7 @@
 bl_info = {
     "name": "Emet Tools",
-    "author": "Maurycy Kujawski",
-    "version": (1, 0),
+    "author": "Maurycy Kujawski, Jakub Szukała",
+    "version": (2, 0),
     "blender": (4, 1, 0),
     "location": "View3D > Sidebar > Example tab",
     "description": "Example with multiple panels",
