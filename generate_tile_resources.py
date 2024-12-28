@@ -303,11 +303,56 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         layout.operator(Emet_Render_Tiles_Operator.bl_idname, text="Render Tiles", icon="SCENE")
 
 
+class NODE_OT_normals_node_template(bpy.types.Operator):
+    bl_label = "Render Tiles"
+    bl_idname = "node.normals_node_template"
+    bl_options = {'REGISTER'}
+
+    def execute(self, context):
+        mat = context.active_object.active_material
+        tree = mat.node_tree
+        links = tree.links
+
+        vector_transform_node = tree.nodes.new(type='ShaderNodeVectorTransform')
+        vector_transform_node.location = 0, 0
+        vector_transform_node.vector_type = 'NORMAL'
+        vector_transform_node.convert_from = 'OBJECT'
+        vector_transform_node.convert_to = 'CAMERA'
+
+        vector_mult = tree.nodes.new(type='ShaderNodeVectorMath')
+        vector_mult.location = 400, 0
+        vector_mult.operation = 'MULTIPLY'
+        vector_mult.inputs[1].default_value = 1.0, 1.0, -1.0
+
+        links.new(vector_transform_node.outputs[0], vector_mult.inputs[0])
+
+        return {'FINISHED'}
+
+
+class NODE_PT_node_templates_panel(bpy.types.Panel):
+    bl_label = "Node Templates Panel"
+    bl_idname = "node.node_templates_panel"
+    bl_space_type = 'NODE_EDITOR'
+    bl_region_type = 'UI'
+    bl_category = 'Node Templates'
+    bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, context): # This tells when to show
+        return (context.space_data.type == 'NODE_EDITOR' and
+                context.space_data.tree_type == 'ShaderNodeTree')
+
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Click on the button to generate one of node templates")
+        layout.operator(NODE_OT_normals_node_template.bl_idname, text="Normals template", icon="SCENE")
+
+
 classes = [
     Emet_Properties,
     Emet_Render_Tiles_Operator, Emet_Tiles_Panel,
     MATERIAL_UL_matslots_global, UIEmetMaterialPicker, MaterialSelectPanelMeta,
-    EmetAddToMatPicker
+    EmetAddToMatPicker, NODE_PT_node_templates_panel, NODE_OT_normals_node_template
 ]
 
 
