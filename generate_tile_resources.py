@@ -245,7 +245,7 @@ class RendererOperator():
         output = cv2.vconcat(self.render_out)
         filepath = os.path.join(
             self.emet_tool.tile_outputPath,
-            f"{self.emet_tool.tile_prefix}_diffuse.png"
+            f"{self.emet_tool.tile_prefix}.png"
         )
         filepath = os.path.abspath(filepath)
         cv2.imwrite(filepath, output)
