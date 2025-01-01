@@ -36,7 +36,7 @@ def combine_frames(inputPath, prefix):
         if not os.path.isfile(fp) or not f.startswith(prefix):
             continue
         filepaths.append(fp)
-    filepaths.sort(reverse=True)
+    filepaths.sort()
 
     images = [cv2.imread(filepath, cv2.IMREAD_UNCHANGED) for filepath in filepaths]
     return cv2.hconcat(images)
