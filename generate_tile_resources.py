@@ -188,8 +188,10 @@ class RendererOperator():
         self.camera = None
         self.camera_location_cache = None
         self.camera_rotation_cache = None
+        self.output_directory = None
+        self.output_tmp_directory = None
+        self.output_tmp_filename = None
         self.PREFIX = "tmp_tiles"
-        self.temp_path = None
         #self.scene.render.filepath = None
         self.render_out = []
 
@@ -234,16 +236,16 @@ class RendererOperator():
             )
 
             if self.emet_tool.isAnimated:
-                current_tile = combine_frames(self.output_tmp_dir, self.PREFIX)
+                current_tile = combine_frames(self.output_tmp_directory, self.PREFIX)
             else:
-                current_tile = read_image(f"{self.temp_path}.png")
+                current_tile = read_image(f"{self.output_tmp_filename}.png")
 
             # TODO: Maybe storing all these in RAM is not ideal if we got some large images and render is running
             # in the background. We could write intermediate horizontal sprites to the tmp directory
             self.render_out.append(current_tile)
 
         output = cv2.vconcat(self.render_out)
-        filepath = os.path.join(self.emet_tool.output_directory, self.emet_tool.output_filename)
+        filepath = os.path.join(self.output_directory, self.emet_tool.output_filename)
         cv2.imwrite(os.path.abspath(filepath), output)
 
 
@@ -254,10 +256,11 @@ class RendererOperator():
         return cameras[0]
 
 
+# TODO: Probably inheriting RendererOperator is pointless here, remove it and put everything here
 class Emet_Render_Tiles_Operator(bpy.types.Operator, RendererOperator):
     bl_idname = "emet.emet_render_tiles_operator"
     bl_label = "Render Tiles"
-    bl_options = {'REGISTER'}
+    bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         # Extract data from context
@@ -266,38 +269,61 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator, RendererOperator):
         self.emet_tool = self.scene.EmetTool
         self.matselcoll = self.scene.MatSelColl
 
-        # Setup camera
-        # TODO: camera caches are never restored
-        self.camera = self._get_render_camera()
-        self.camera_location_cache = self.camera.location
-        self.camera_rotation_cache = self.camera.rotation_euler # Should this be deep copied?
+        try:
+            self._setup_camera()
+            self._setup_filepaths()
+        except:
+            # We can return CANCELLED because we didn't modifiy Blender data
+            return {"CANCELLED"}
 
-        # User provides output directory, which **must** exist
-        assert(os.path.exists(self.emet_tool.output_directory))
-
-        # In this directory we will create a temp folder to store our outputs
-        self.output_tmp_dir = os.path.join(self.emet_tool.output_directory, f"tmp-render-{datetime.datetime.now()}")
-        os.makedirs(self.output_tmp_dir, exist_ok=False)
-
-        # We set render filepath to temp directory + prefix
-        self.PREFIX = "tmp_tiles"
-        self.temp_path = os.path.abspath(os.path.join(self.output_tmp_dir, self.PREFIX))
-        self.scene.render.filepath = os.path.abspath(self.temp_path)
-        self.render_out = []
-
-        self.render()
-
-        self.cleanup()
+        try:
+            self.render()
+            self._cleanup()
+        except:
+            # At this point Blender data is surely modified so return FINISHED
+            return {"FINISHED"}
 
         return {'FINISHED'}
 
 
-    def cleanup(self):
-        for tmp_file in os.listdir(self.output_tmp_dir):
-            assert(tmp_file.startswith(self.PREFIX))
-            filepath = os.path.join(self.output_tmp_dir, tmp_file)
+    def _setup_camera(self):
+        self.camera = self._get_render_camera()
+        self.camera_location_cache = self.camera.location
+        self.camera_rotation_cache = self.camera.rotation_euler
+
+
+    def _setup_filepaths(self):
+        # User provides output directory, which **must** exist. Here will be the output file placed
+        if not os.path.exists(self.emet_tool.output_directory):
+            error_msg = f"Output directory: {self.emet_tool.output_directory} does not exist!"
+            self.report({"ERROR"}, error_msg)
+            raise RuntimeError(error_msg)
+        self.output_directory = os.path.abspath(self.emet_tool.output_directory)
+
+        # In this directory we will create a temp folder to store our outputs. It is inside output_directory.
+        # It can't exist as it will be deleted during cleanup.
+        self.output_tmp_directory = os.path.join(self.output_directory, f"tmp-render-{datetime.datetime.now()}")
+        self.output_tmp_directory = os.path.abspath(self.output_tmp_directory)
+        try:
+            os.makedirs(self.output_tmp_directory, exist_ok=False)
+        except FileExistsError:
+            self.report({"ERROR"}, f"There already exists directory with the same name as temp directory: {self.output_tmp_directory}")
+
+        # We set render filepath to temp directory + prefix. All intermediate tiles will be stored in temp directory,
+        # with name prefix + tile number
+        self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_directory, self.PREFIX))
+        self.scene.render.filepath = self.output_tmp_filename
+
+
+    def _cleanup(self):
+        for tmp_file in os.listdir(self.output_tmp_directory):
+            if not tmp_file.startswith(self.PREFIX):
+                error_msg = f"Detected file not starting with \"{self.PREFIX}\" prefix: {tmp_file}"
+                self.report({"ERROR"}, error_msg)
+                raise RuntimeError(error_msg)
+            filepath = os.path.join(self.output_tmp_directory, tmp_file)
             os.remove(filepath)
-        os.rmdir(self.output_tmp_dir)
+        os.rmdir(self.output_tmp_directory)
 
 
 class Emet_Tiles_Panel(bpy.types.Panel):
