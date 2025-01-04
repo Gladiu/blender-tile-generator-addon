@@ -19,6 +19,7 @@ bl_info = {
 import bpy
 import math
 import random
+import datetime
 
 # ------------------------------------------------------------------------
 #   Combine output images
@@ -149,20 +150,20 @@ class Emet_Properties(bpy.types.PropertyGroup):
         default = False,
     )
 
-    tile_prefix: bpy.props.StringProperty(
-        name="Name",
-        description="Output file prefix",
-        default="",
-        maxlen=1024,
-        subtype='FILE_NAME'
-    )
-
-    tile_outputPath: bpy.props.StringProperty(
-        name = "Output",
+    output_directory: bpy.props.StringProperty(
+        name = "Output directory",
         description="Choose output directory",
-        default = os.path.join(".", "tmp"),
+        default = ".",
         maxlen=1024,
         subtype='DIR_PATH'
+    )
+
+    output_filename: bpy.props.StringProperty(
+        name="Output file name",
+        description="Output file prefix",
+        default="output.png",
+        maxlen=1024,
+        subtype='FILE_NAME'
     )
 
     rotations : bpy.props.IntProperty(
@@ -194,9 +195,6 @@ class RendererOperator():
 
 
     def render(self):
-        # Prepare render temp directory
-        os.makedirs(self.emet_tool.tile_outputPath, exist_ok=True)
-
         # Apply materials
         for member in self.matselcoll:
             obj = bpy.context.scene.objects[member.name]
@@ -236,19 +234,17 @@ class RendererOperator():
             )
 
             if self.emet_tool.isAnimated:
-                current_tile = combine_frames(self.emet_tool.tile_outputPath, self.PREFIX)
+                current_tile = combine_frames(self.output_tmp_dir, self.PREFIX)
             else:
                 current_tile = read_image(f"{self.temp_path}.png")
 
+            # TODO: Maybe storing all these in RAM is not ideal if we got some large images and render is running
+            # in the background. We could write intermediate horizontal sprites to the tmp directory
             self.render_out.append(current_tile)
 
         output = cv2.vconcat(self.render_out)
-        filepath = os.path.join(
-            self.emet_tool.tile_outputPath,
-            f"{self.emet_tool.tile_prefix}.png"
-        )
-        filepath = os.path.abspath(filepath)
-        cv2.imwrite(filepath, output)
+        filepath = os.path.join(self.emet_tool.output_directory, self.emet_tool.output_filename)
+        cv2.imwrite(os.path.abspath(filepath), output)
 
 
     def _get_render_camera(self):
@@ -264,22 +260,44 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator, RendererOperator):
     bl_options = {'REGISTER'}
 
     def execute(self, context):
-        # Perform any necessary setup here before calling universal rendering function
+        # Extract data from context
         self.context = context
         self.scene = context.scene
         self.emet_tool = self.scene.EmetTool
         self.matselcoll = self.scene.MatSelColl
+
+        # Setup camera
+        # TODO: camera caches are never restored
         self.camera = self._get_render_camera()
         self.camera_location_cache = self.camera.location
         self.camera_rotation_cache = self.camera.rotation_euler # Should this be deep copied?
+
+        # User provides output directory, which **must** exist
+        assert(os.path.exists(self.emet_tool.output_directory))
+
+        # In this directory we will create a temp folder to store our outputs
+        self.output_tmp_dir = os.path.join(self.emet_tool.output_directory, f"tmp-render-{datetime.datetime.now()}")
+        os.makedirs(self.output_tmp_dir, exist_ok=False)
+
+        # We set render filepath to temp directory + prefix
         self.PREFIX = "tmp_tiles"
-        self.temp_path = os.path.abspath(os.path.join(self.emet_tool.tile_outputPath, self.PREFIX))
+        self.temp_path = os.path.abspath(os.path.join(self.output_tmp_dir, self.PREFIX))
         self.scene.render.filepath = os.path.abspath(self.temp_path)
         self.render_out = []
 
         self.render()
 
+        self.cleanup()
+
         return {'FINISHED'}
+
+
+    def cleanup(self):
+        for tmp_file in os.listdir(self.output_tmp_dir):
+            assert(tmp_file.startswith(self.PREFIX))
+            filepath = os.path.join(self.output_tmp_dir, tmp_file)
+            os.remove(filepath)
+        os.rmdir(self.output_tmp_dir)
 
 
 class Emet_Tiles_Panel(bpy.types.Panel):
@@ -297,8 +315,8 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         layout.label(text="Select objects to pick materials")
         layout.prop(EmetTool, "rotations")
         layout.prop(EmetTool, "isAnimated")
-        layout.prop(EmetTool, "tile_prefix")
-        layout.prop(EmetTool, "tile_outputPath")
+        layout.prop(EmetTool, "output_filename")
+        layout.prop(EmetTool, "output_directory")
 
         layout.operator(Emet_Render_Tiles_Operator.bl_idname, text="Render Tiles", icon="SCENE")
 
