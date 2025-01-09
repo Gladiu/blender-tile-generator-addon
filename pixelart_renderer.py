@@ -39,97 +39,6 @@ def read_image(inputPath):
     return image
 
 
-class EmetAddToMatPicker(bpy.types.Operator):
-    """
-    This operator grabs currently selected objects and adds them to
-    scene's MatSelColl (CollectionProperty(type=MaterialSelectPanelMeta))
-    """
-    bl_idname = "emet.emet_add_to_mat_picker"
-    bl_label = "Select objects for material picker"
-    bl_options = {'REGISTER'}
-
-    def execute(self, context):
-        MatSelColl = context.scene.MatSelColl
-        MatSelColl.clear()
-        for obj in bpy.context.selected_objects:
-            prop = MatSelColl.add()
-            prop.name = obj.name
-            prop.active_index_mat = 0
-        return {'FINISHED'}
-
-
-class MATERIAL_UL_matslots_global(bpy.types.UIList):
-    """
-    Draws list of materials for UIEmetMaterialPicker picker.
-    """
-    def draw_item(self, context, layout, data, item, icon, active_data, active_propname):
-        if self.layout_type in {'DEFAULT', 'COMPACT'}:
-            if item:
-                layout.prop(item, "name", text="", emboss=False, icon_value=icon)
-            else:
-                layout.label(text="", translate=False, icon_value=icon)
-        elif self.layout_type == 'GRID':
-            layout.alignment = 'CENTER'
-            layout.label(text="", icon_value=icon)
-
-
-class UIEmetMaterialPicker(bpy.types.Panel):
-    """
-    Panel exposing material picker properties and operators.
-    """
-    bl_label = "Material picker"
-    bl_category = "Emet Utils"
-    bl_idname = "OBJECT_PT_ui_emet_material_picker"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_options = {"DEFAULT_CLOSED"}
-
-    def draw(self, context):
-        layout = self.layout
-        MatSelColl = context.scene.MatSelColl
-
-        # Operator that adds selected objects to MatSelColl as MaterialSelectPanelMeta
-        layout.operator(
-            EmetAddToMatPicker.bl_idname,
-            text=EmetAddToMatPicker.bl_label,
-            icon="SELECT_SET"
-        )
-
-        # Draw material picker for each selected member
-        for member in MatSelColl:
-            layout.label(text=member.name)
-            layout.template_list(
-                "MATERIAL_UL_matslots_global",
-                "",
-                bpy.data,
-                "materials",
-                member,
-                "active_index_mat"
-            )
-
-
-# ------------------------------------------------------------------------
-#   Config Classes
-#   UI Properties
-# ------------------------------------------------------------------------
-
-
-class MaterialSelectPanelMeta(bpy.types.PropertyGroup):
-    name: bpy.props.StringProperty(
-        name="Object Name",
-        description="Selected object name",
-        default="",
-        maxlen=1024,
-    )
-
-    active_index_mat: bpy.props.IntProperty(
-        name = "Active Index Material",
-        description = "Index of currently selected material in global material scope",
-        default = 0,
-        min = 0
-    )
-
-
 class Emet_Properties(bpy.types.PropertyGroup):
     isAnimated : bpy.props.BoolProperty(
         name = "Is Animated?",
@@ -161,10 +70,6 @@ class Emet_Properties(bpy.types.PropertyGroup):
         max = 8
     )
 
-
-# ------------------------------------------------------------------------
-#   Tiles Classes
-# ------------------------------------------------------------------------
 
 class RendererOperator():
     def __init__(self) -> None:
@@ -334,37 +239,9 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         layout.operator(Emet_Render_Tiles_Operator.bl_idname, text="Render Tiles", icon="SCENE")
 
 
-class NODE_OT_normals_node_template(bpy.types.Operator):
-    bl_label = "Render Tiles"
-    bl_idname = "node.normals_node_template"
-    bl_options = {'REGISTER'}
-
-    def execute(self, context):
-        mat = context.active_object.active_material
-        tree = mat.node_tree
-        links = tree.links
-
-        vector_transform_node = tree.nodes.new(type='ShaderNodeVectorTransform')
-        vector_transform_node.location = 0, 0
-        vector_transform_node.vector_type = 'NORMAL'
-        vector_transform_node.convert_from = 'OBJECT'
-        vector_transform_node.convert_to = 'CAMERA'
-
-        vector_mult = tree.nodes.new(type='ShaderNodeVectorMath')
-        vector_mult.location = 400, 0
-        vector_mult.operation = 'MULTIPLY'
-        vector_mult.inputs[1].default_value = 1.0, 1.0, -1.0
-
-        links.new(vector_transform_node.outputs[0], vector_mult.inputs[0])
-
-        return {'FINISHED'}
-
-
 classes = [
     Emet_Properties,
     Emet_Render_Tiles_Operator, Emet_Tiles_Panel,
-    MATERIAL_UL_matslots_global, UIEmetMaterialPicker, MaterialSelectPanelMeta,
-    EmetAddToMatPicker, NODE_OT_normals_node_template
 ]
 
 
@@ -372,7 +249,6 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.Scene.EmetTool = bpy.props.PointerProperty(type=Emet_Properties)
-    bpy.types.Scene.MatSelColl = bpy.props.CollectionProperty(type=MaterialSelectPanelMeta)
 
 
 def unregister():
