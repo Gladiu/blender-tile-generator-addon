@@ -1,19 +1,4 @@
-bl_info = {
-    "name": "Emet Tools",
-    "author": "Maurycy Kujawski, Jakub Szukała",
-    "version": (2, 0),
-    "blender": (4, 1, 0),
-    "location": "View3D > Sidebar > Example tab",
-    "description": "Example with multiple panels",
-    "warning": "",
-    "wiki_url": "",
-    "category": "3D View"}
-# README
-# TO INSTALL OPENCV IN BLENDER
-# Go to blender python directory and run those commands to install opencv
-# ./python3.5m -m ensurepip
-# ./python3.5m -m pip install --upgrade pip
-# ./python3.5m -m pip install opencv-python
+
 
 
 import bpy
@@ -28,6 +13,7 @@ import datetime
 import cv2
 from pathlib import Path
 import os
+
 
 def combine_frames(inputPath, prefix):
     # Get everything that is a file and starts with prefix from inputPath
@@ -122,99 +108,10 @@ class UIEmetMaterialPicker(bpy.types.Panel):
             )
 
 
-def get_actions_names(_, _1):
-    action_names = [(f"ACT{i}", x[0], "") for i, x in enumerate(bpy.data.actions.items())]
-    action_names.insert(0, ("NONE", "None", ""))
-    return action_names
-
-
-class AddRowToActionsMixer(bpy.types.Operator):
-    """
-    """
-    bl_idname = "emet.add_row_to_actions_mixer"
-    bl_label = "Row Actions Mixer Add Operator"
-    bl_options = {'REGISTER'}
-
-    def execute(self, context):
-        ActionsPropColl = context.scene.ActionsPropColl
-        ActionsPropColl.add()
-        return {'FINISHED'}
-
-
-class RemoveRowToActionsMixer(bpy.types.Operator):
-    """
-    """
-    bl_idname = "emet.remove_row_to_actions_mixer"
-    bl_label = "Row Actions Mixer Remove Operaotr"
-    bl_options = {'REGISTER'}
-
-    def execute(self, context):
-        ActionsPropColl = context.scene.ActionsPropColl
-        ActionsPropColl.remove(len(ActionsPropColl) - 1)
-        return {'FINISHED'}
-
-
-# TODO: This should **only** be displayed if the animated checkbox is set
-class ActionsMixerPanel(bpy.types.Panel):
-    bl_label = "Layout Demo"
-    bl_category = "Emet Utils"
-    bl_idname = "SCENE_PT_ui_actions_mixer"
-    bl_space_type = 'VIEW_3D'
-    bl_region_type = 'UI'
-    bl_options = {"DEFAULT_CLOSED"}
-
-
-    def draw(self, context):
-        layout = self.layout
-        scene = context.scene
-        ActionsPropColl = context.scene.ActionsPropColl
-
-        grid = layout.grid_flow(row_major=True, columns=4, align=True)
-        grid.label(text="Character action name")
-        grid.label(text="Prop action name")
-        grid.label(text="Frame start")
-        grid.label(text="Frame end")
-        for member in ActionsPropColl:
-            grid.prop(member, "character_action_name")
-            grid.prop(member, "prop_action_name")
-            grid.prop(member, "frame_start")
-            grid.prop(member, "frame_end")
-        grid.label(text=" ")
-        grid.operator(AddRowToActionsMixer.bl_idname, text="Add row", icon="SCENE")
-        grid.operator(RemoveRowToActionsMixer.bl_idname, text="Remove row", icon="SCENE")
-        grid.label(text=" ")
-
 # ------------------------------------------------------------------------
 #   Config Classes
 #   UI Properties
 # ------------------------------------------------------------------------
-
-class ActionsMixerMeta(bpy.types.PropertyGroup):
-    character_action_name: bpy.props.EnumProperty(
-        name="Action names",
-        description="Actions available in current scope",
-        items=get_actions_names
-    )
-
-    prop_action_name: bpy.props.EnumProperty(
-        name="Action names",
-        description="Actions available in current scope",
-        items=get_actions_names
-    )
-
-    frame_start: bpy.props.IntProperty(
-        "Frame start",
-        description="Frame from which to start rendering",
-        default=1,
-        min=0
-    )
-
-    frame_end: bpy.props.IntProperty(
-        "Frame end",
-        description="Frame up to which render action",
-        default=10,
-        min=0
-    )
 
 
 class MaterialSelectPanelMeta(bpy.types.PropertyGroup):
@@ -467,18 +364,15 @@ classes = [
     Emet_Properties,
     Emet_Render_Tiles_Operator, Emet_Tiles_Panel,
     MATERIAL_UL_matslots_global, UIEmetMaterialPicker, MaterialSelectPanelMeta,
-    EmetAddToMatPicker, NODE_OT_normals_node_template, ActionsMixerPanel, ActionsMixerMeta,
-    AddRowToActionsMixer, RemoveRowToActionsMixer
+    EmetAddToMatPicker, NODE_OT_normals_node_template
 ]
 
 
 def register():
-    print("Registering Emet Tools...")
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.Scene.EmetTool = bpy.props.PointerProperty(type=Emet_Properties)
     bpy.types.Scene.MatSelColl = bpy.props.CollectionProperty(type=MaterialSelectPanelMeta)
-    bpy.types.Scene.ActionsPropColl = bpy.props.CollectionProperty(type=ActionsMixerMeta)
 
 
 def unregister():
@@ -486,5 +380,3 @@ def unregister():
         bpy.utils.unregister_class(c)
 
 
-if __name__ == "__main__":
-    register()
