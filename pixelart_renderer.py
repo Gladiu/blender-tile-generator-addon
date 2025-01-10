@@ -71,7 +71,12 @@ class Emet_Properties(bpy.types.PropertyGroup):
     )
 
 
-class RendererOperator():
+class Emet_Render_Tiles_Operator(bpy.types.Operator):
+    bl_idname = "emet.emet_render_tiles_operator"
+    bl_label = "Render Tiles"
+    bl_options = {'REGISTER', 'UNDO'}
+
+
     def __init__(self) -> None:
         self.context = None
         self.scene = None
@@ -84,11 +89,34 @@ class RendererOperator():
         self.output_tmp_directory = None
         self.output_tmp_filename = None
         self.PREFIX = "tmp_tiles"
-        #self.scene.render.filepath = None
         self.render_out = []
 
 
-    def render(self):
+    def execute(self, context):
+        # Extract data from context
+        self.context = context
+        self.scene = context.scene
+        self.emet_tool = self.scene.EmetTool
+        self.matselcoll = self.scene.MatSelColl
+
+        try:
+            self._setup_camera()
+            self._setup_filepaths()
+        except:
+            # We can return CANCELLED because we didn't modifiy Blender data
+            return {"CANCELLED"}
+
+        try:
+            self._render()
+            self._cleanup()
+        except:
+            # At this point Blender data is surely modified so return FINISHED
+            return {"FINISHED"}
+
+        return {'FINISHED'}
+
+
+    def _render(self):
         # Apply materials
         for member in self.matselcoll:
             obj = bpy.context.scene.objects[member.name]
@@ -146,36 +174,6 @@ class RendererOperator():
         if 1 != len(cameras):
             raise ValueError("There should only be one camera in the scene.")
         return cameras[0]
-
-
-# TODO: Probably inheriting RendererOperator is pointless here, remove it and put everything here
-class Emet_Render_Tiles_Operator(bpy.types.Operator, RendererOperator):
-    bl_idname = "emet.emet_render_tiles_operator"
-    bl_label = "Render Tiles"
-    bl_options = {'REGISTER', 'UNDO'}
-
-    def execute(self, context):
-        # Extract data from context
-        self.context = context
-        self.scene = context.scene
-        self.emet_tool = self.scene.EmetTool
-        self.matselcoll = self.scene.MatSelColl
-
-        try:
-            self._setup_camera()
-            self._setup_filepaths()
-        except:
-            # We can return CANCELLED because we didn't modifiy Blender data
-            return {"CANCELLED"}
-
-        try:
-            self.render()
-            self._cleanup()
-        except:
-            # At this point Blender data is surely modified so return FINISHED
-            return {"FINISHED"}
-
-        return {'FINISHED'}
 
 
     def _setup_camera(self):
