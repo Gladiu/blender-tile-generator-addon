@@ -9,6 +9,14 @@ def register():
 
     # TODO: Change name!
     bpy.types.Scene.ActionsPropColl = bpy.props.CollectionProperty(type=ActionsMixerRow)
+    bpy.types.Scene.CharacterPointer = bpy.props.PointerProperty(
+        type=bpy.types.Object,
+        poll=lambda _, obj: obj.type == "ARMATURE", # Filter to only allow armatures
+    )
+    bpy.types.Scene.PropPointer = bpy.props.PointerProperty(
+        type=bpy.types.Object,
+        poll=lambda _, obj: obj.type == "ARMATURE", # Filter to only allow armatures
+    )
 
 
 def unregister():
@@ -19,8 +27,8 @@ def unregister():
 
 
 def _get_actions_names(_1, _2):
-    action_names = [(f"ACT{i}", x[0], "") for i, x in enumerate(bpy.data.actions.items())]
-    action_names.insert(0, ("NONE", "None", ""))
+    action_names = [(x, x, "") for x in bpy.data.actions.keys()]
+    action_names.insert(0, ("None", "None", ""))
     return action_names
 
 
@@ -52,7 +60,6 @@ class ActionsMixerRow(bpy.types.PropertyGroup):
     )
 
 
-# TODO: This should **only** be displayed if the animated checkbox is set
 class ActionsMixerPanel(bpy.types.Panel):
     bl_label = "Actions Mixer Panel"
     bl_category = "Emet Utils" # TODO: This should be changed
@@ -65,6 +72,9 @@ class ActionsMixerPanel(bpy.types.Panel):
         layout = self.layout
         ActionsPropColl = context.scene.ActionsPropColl
 
+        row = self.layout.row(align=True)
+        row.prop(context.scene, "CharacterPointer", text="Character")
+        row.prop(context.scene, "PropPointer", text="Prop")
         grid = layout.grid_flow(row_major=True, columns=4, align=True)
         grid.label(text="Character action name")
         grid.label(text="Prop action name")

@@ -82,13 +82,17 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.scene = None
         self.emet_tool = None
         self.matselcoll = None
+        self.actions_prop_coll = None
         self.camera = None
         self.camera_location_cache = None
         self.camera_rotation_cache = None
         self.output_directory = None
         self.output_tmp_directory = None
+        self.output_tmp_tiles_directory = None
+        self.output_tmp_strips_directory = None
         self.output_tmp_filename = None
-        self.PREFIX = "tmp_tiles"
+        self.TILE_PREFIX = "tmp_tile"
+        self.STRIP_PREFIX = "tmp_hstrip"
         self.render_out = []
 
 
@@ -98,6 +102,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.scene = context.scene
         self.emet_tool = self.scene.EmetTool
         self.matselcoll = self.scene.MatSelColl
+        self.actions_prop_coll = self.scene.ActionsPropColl
 
         try:
             self._setup_camera()
@@ -108,8 +113,9 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
         try:
             self._render()
-            self._cleanup()
-        except:
+            os.rmdir(self.output_tmp_directory)
+        except Exception as e:
+            self.report({"ERROR"}, str(e))
             # At this point Blender data is surely modified so return FINISHED
             return {"FINISHED"}
 
@@ -136,43 +142,82 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
             obj = bpy.context.scene.objects[member.name]
             mat = bpy.data.materials[member.active_index_mat]
 
-        # Render rotations
-        for _ in range(0, self.emet_tool.rotations):
-            # Rotate camera around it's Z axis
-            self.camera.rotation_euler[2] += camera_rotation_angle
+        for actions_mixer_row in self.actions_prop_coll:
+            is_animated = self._set_animations(actions_mixer_row)
+            # Render rotations
+            for _ in range(0, self.emet_tool.rotations):
+                # Rotate camera around it's Z axis
+                self.camera.rotation_euler[2] += camera_rotation_angle
 
-            # Rotate camera position vector
-            x, y = self.camera.location.x, self.camera.location.y
-            self.camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
-            self.camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
+                # Rotate camera position vector
+                x, y = self.camera.location.x, self.camera.location.y
+                self.camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
+                self.camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
 
-            # Render
-            bpy.ops.render.render(
-                animation=self.emet_tool.isAnimated,
-                write_still=True,
-                use_viewport=False,
-                layer='',
-                scene=''
-            )
+                self._render_hstrip(is_animated)
+                self._tiles_cleanup()
 
-            if self.emet_tool.isAnimated:
-                current_tile = combine_frames(self.output_tmp_directory, self.PREFIX)
-            else:
-                current_tile = read_image(f"{self.output_tmp_filename}.png")
+        # Save to sprite sheet
+        strips_files = os.listdir(self.output_tmp_strips_directory)
+        strips_files.sort(key=lambda x: int(x.replace(self.STRIP_PREFIX, "").replace(".png", "")))
+        print(strips_files)
+        strips = [cv2.imread(os.path.join(self.output_tmp_strips_directory, filename)) for filename in strips_files]
+        cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(strips))
+        self._strips_cleanup()
 
-            # TODO: Maybe storing all these in RAM is not ideal if we got some large images and render is running
-            # in the background. We could write intermediate horizontal sprites to the tmp directory
-            self.render_out.append(current_tile)
+        #output = cv2.vconcat(self.render_out)
+        #filepath = os.path.join(self.output_directory, self.emet_tool.output_filename)
+        #cv2.imwrite(os.path.abspath(filepath), output)
 
-        output = cv2.vconcat(self.render_out)
-        filepath = os.path.join(self.output_directory, self.emet_tool.output_filename)
-        cv2.imwrite(os.path.abspath(filepath), output)
+
+    def _set_animations(self, actions_mixer_row):
+        character_armature = self.scene.CharacterPointer
+        prop_armature = self.scene.PropPointer
+        is_animated = False
+        character_frame_end = 0
+        prop_frame_end = 0
+        if actions_mixer_row.character_action_name in bpy.data.actions \
+                and actions_mixer_row.character_action_name != "None" \
+                and character_armature.animation_data != None:
+            character_armature.animation_data.action = bpy.data.actions[actions_mixer_row.character_action_name]
+            character_frame_end = bpy.data.actions[actions_mixer_row.character_action_name].frame_end
+            is_animated = True
+        if actions_mixer_row.prop_action_name in bpy.data.actions \
+                and actions_mixer_row.prop_action_name != "None" \
+                and prop_armature.animation_data != None:
+            prop_armature.animation_data.action = bpy.data.actions[actions_mixer_row.prop_action_name]
+            prop_frame_end = bpy.data.actions[actions_mixer_row.prop_action_name].frame_end
+            is_animated = True
+
+        if is_animated:
+            self.scene.frame_start = 1
+            self.scene.frame_end = int(character_frame_end if character_frame_end > prop_frame_end else prop_frame_end)
+
+        return is_animated
+
+
+    def _render_hstrip(self, is_animated):
+        # TODO: Add asserts?
+        bpy.ops.render.render(
+            animation=is_animated,
+            write_still=True,
+            use_viewport=False,
+            layer='',
+            scene=''
+        )
+
+        hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+        hstrip_name = self.STRIP_PREFIX + str(len(os.listdir(self.output_tmp_strips_directory))) + ".png"
+        hstrip_path = os.path.join(self.output_tmp_strips_directory, hstrip_name)
+        cv2.imwrite(hstrip_path, hstrip)
 
 
     def _get_render_camera(self):
         cameras = [ob for ob in self.context.scene.objects if ob.type == 'CAMERA']
         if 1 != len(cameras):
-            raise ValueError("There should only be one camera in the scene.")
+            error_msg = "There should only be one camera in the scene."
+            self.report({"ERROR"}, error_msg)
+            raise ValueError(error_msg)
         return cameras[0]
 
 
@@ -190,30 +235,42 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
             raise RuntimeError(error_msg)
         self.output_directory = os.path.abspath(self.emet_tool.output_directory)
 
-        # In this directory we will create a temp folder to store our outputs. It is inside output_directory.
-        # It can't exist as it will be deleted during cleanup.
+        # Create temporary directory to store outputs. It will contain two subdirectories to store tiles and strips
+        # separately, to ease joining them together later
         self.output_tmp_directory = os.path.join(self.output_directory, f"tmp-render-{datetime.datetime.now()}")
         self.output_tmp_directory = os.path.abspath(self.output_tmp_directory)
+        self.output_tmp_tiles_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "tiles"))
+        self.output_tmp_strips_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "strips"))
         try:
             os.makedirs(self.output_tmp_directory, exist_ok=False)
+            os.makedirs(self.output_tmp_strips_directory, exist_ok=False)
+            os.makedirs(self.output_tmp_tiles_directory, exist_ok=False)
         except FileExistsError:
-            self.report({"ERROR"}, f"There already exists directory with the same name as temp directory: {self.output_tmp_directory}")
+            self.report({"ERROR"}, f"Could not create temp directories")
 
-        # We set render filepath to temp directory + prefix. All intermediate tiles will be stored in temp directory,
+        # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
         # with name prefix + tile number
-        self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_directory, self.PREFIX))
+        self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_tiles_directory, self.TILE_PREFIX))
         self.scene.render.filepath = self.output_tmp_filename
 
 
-    def _cleanup(self):
-        for tmp_file in os.listdir(self.output_tmp_directory):
-            if not tmp_file.startswith(self.PREFIX):
-                error_msg = f"Detected file not starting with \"{self.PREFIX}\" prefix: {tmp_file}"
+    def _strips_cleanup(self):
+        self._cleanup(self.output_tmp_strips_directory, self.STRIP_PREFIX)
+
+
+    def _tiles_cleanup(self):
+        self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+
+
+    def _cleanup(self, path, prefix):
+        for tmp_file in os.listdir(path):
+            if not tmp_file.startswith(prefix):
+                error_msg = f"Detected file not starting with \"{prefix}\" prefix: {tmp_file}"
                 self.report({"ERROR"}, error_msg)
                 raise RuntimeError(error_msg)
-            filepath = os.path.join(self.output_tmp_directory, tmp_file)
+            filepath = os.path.join(path, tmp_file)
             os.remove(filepath)
-        os.rmdir(self.output_tmp_directory)
+        os.rmdir(path)
 
 
 class Emet_Tiles_Panel(bpy.types.Panel):
@@ -238,8 +295,7 @@ class Emet_Tiles_Panel(bpy.types.Panel):
 
 
 classes = [
-    Emet_Properties,
-    Emet_Render_Tiles_Operator, Emet_Tiles_Panel,
+    Emet_Properties, Emet_Render_Tiles_Operator, Emet_Tiles_Panel,
 ]
 
 
