@@ -34,29 +34,15 @@ def _get_actions_names(_1, _2):
 
 class ActionsMixerRow(bpy.types.PropertyGroup):
     character_action_name: bpy.props.EnumProperty(
-        name="Action names",
+        name="Action name",
         description="Actions available in current scope",
         items=_get_actions_names
     )
 
     prop_action_name: bpy.props.EnumProperty(
-        name="Action names",
+        name="Action name",
         description="Actions available in current scope",
         items=_get_actions_names
-    )
-
-    frame_start: bpy.props.IntProperty(
-        "Frame start",
-        description="Frame from which to start rendering",
-        default=1,
-        min=0
-    )
-
-    frame_end: bpy.props.IntProperty(
-        "Frame end",
-        description="Frame up to which render action",
-        default=10,
-        min=0
     )
 
 
@@ -75,7 +61,7 @@ class ActionsMixerPanel(bpy.types.Panel):
         row = self.layout.row(align=True)
         row.prop(context.scene, "CharacterPointer", text="Character")
         row.prop(context.scene, "PropPointer", text="Prop")
-        grid = layout.grid_flow(row_major=True, columns=4, align=True)
+        grid = layout.grid_flow(row_major=True, columns=2, align=True)
         grid.label(text="Character action name")
         grid.label(text="Prop action name")
         grid.label(text="Frame start")
@@ -83,8 +69,6 @@ class ActionsMixerPanel(bpy.types.Panel):
         for member in ActionsPropColl:
             grid.prop(member, "character_action_name")
             grid.prop(member, "prop_action_name")
-            grid.prop(member, "frame_start")
-            grid.prop(member, "frame_end")
         row = layout.row()
         row.operator(ActionsMixerAddRow.bl_idname, text="Add row", icon="SCENE")
         row.operator(ActionsMixerRemoveRow.bl_idname, text="Remove row", icon="SCENE")

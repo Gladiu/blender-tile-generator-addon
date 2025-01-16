@@ -1,6 +1,3 @@
-
-
-
 import bpy
 import math
 import random
@@ -13,6 +10,7 @@ import datetime
 import cv2
 from pathlib import Path
 import os
+import numpy as np
 
 
 def combine_frames(inputPath, prefix):
@@ -114,6 +112,8 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         try:
             self._render()
             os.rmdir(self.output_tmp_directory)
+            self.camera.location = self.camera_location_cache
+            self.camera.rotation_euler = self.camera_rotation_cache
         except Exception as e:
             self.report({"ERROR"}, str(e))
             # At this point Blender data is surely modified so return FINISHED
@@ -158,16 +158,24 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
                 self._tiles_cleanup()
 
         # Save to sprite sheet
+        self._hstrips_stack()
+        self._hstrips_cleanup()
+
+
+    def _hstrips_stack(self):
         strips_files = os.listdir(self.output_tmp_strips_directory)
         strips_files.sort(key=lambda x: int(x.replace(self.STRIP_PREFIX, "").replace(".png", "")))
-        print(strips_files)
-        strips = [cv2.imread(os.path.join(self.output_tmp_strips_directory, filename)) for filename in strips_files]
+        strips = [cv2.imread(os.path.join(self.output_tmp_strips_directory, filename), cv2.IMREAD_UNCHANGED) for filename in strips_files]
+        max_w = 0
+        for strip in strips:
+            if strip.shape[1] > max_w:
+                max_w = strip.shape[1]
+        for i, strip in enumerate(strips):
+            h, w, d = strip.shape
+            blank = np.zeros((h, max_w, d), strip.dtype)
+            blank[0:h, 0:w] = strip
+            strips[i] = blank
         cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(strips))
-        self._strips_cleanup()
-
-        #output = cv2.vconcat(self.render_out)
-        #filepath = os.path.join(self.output_directory, self.emet_tool.output_filename)
-        #cv2.imwrite(os.path.abspath(filepath), output)
 
 
     def _set_animations(self, actions_mixer_row):
@@ -197,7 +205,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
 
     def _render_hstrip(self, is_animated):
-        # TODO: Add asserts?
         bpy.ops.render.render(
             animation=is_animated,
             write_still=True,
@@ -254,7 +261,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.scene.render.filepath = self.output_tmp_filename
 
 
-    def _strips_cleanup(self):
+    def _hstrips_cleanup(self):
         self._cleanup(self.output_tmp_strips_directory, self.STRIP_PREFIX)
 
 
