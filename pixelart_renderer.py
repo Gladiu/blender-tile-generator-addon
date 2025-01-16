@@ -244,7 +244,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
         # Create temporary directory to store outputs. It will contain two subdirectories to store tiles and strips
         # separately, to ease joining them together later
-        self.output_tmp_directory = os.path.join(self.output_directory, f"tmp-render-{datetime.datetime.now()}")
+        self.output_tmp_directory = os.path.join(self.output_directory, f"tmp-render-{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}")
         self.output_tmp_directory = os.path.abspath(self.output_tmp_directory)
         self.output_tmp_tiles_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "tiles"))
         self.output_tmp_strips_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "strips"))
@@ -252,7 +252,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
             os.makedirs(self.output_tmp_directory, exist_ok=False)
             os.makedirs(self.output_tmp_strips_directory, exist_ok=False)
             os.makedirs(self.output_tmp_tiles_directory, exist_ok=False)
-        except FileExistsError:
+        except:
             self.report({"ERROR"}, f"Could not create temp directories")
 
         # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
