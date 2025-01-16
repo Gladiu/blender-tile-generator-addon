@@ -1,5 +1,10 @@
 # Blender Tile Generation Addon
 
+## Blender addon development little HOW TO
+
+(Also TODO)
+https://blenderartists.org/t/what-is-the-easiest-way-to-reload-the-extensions-while-developing-them/1540372/4
+
 TODOs:
 
 - [ ] Remove OpenCV as dependency
