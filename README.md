@@ -2,13 +2,20 @@
 
 ## Blender addon development little HOW TO
 
-(Also TODO)
-https://blenderartists.org/t/what-is-the-easiest-way-to-reload-the-extensions-while-developing-them/1540372/4
+First we need to install the addon. To install it, we have to generate .zip file with our addons. To do this, in addon repository run:
 
-TODOs:
+```bash
+blender --command extension build
+```
 
-- [ ] Remove OpenCV as dependency
-  - Same functionality probably can be achieved with Numpy (by default in Blender's Python release) and Blender's native file saving functionality
-  - See some usefull links for image saving with Blender [here](https://stackoverflow.com/questions/14982836/rendering-and-saving-images-through-blender-python) and [here](https://blender.stackexchange.com/questions/202145/how-do-you-save-texture-as-an-image-to-disk-with-python)
-- [ ] Add a button to create material for normal map rendering
-  - This could be done if there was a way to separate normal map from final shader just before it connects to Material Output Node
+You will get .zip file that can be installed in blender as addon. As of 4.2, You can go in Blender to Edit->Preferences->GetExtensions->Little arrow in top right corner->Install from disk. Select Your .zip file.
+
+Addon will be installed in one of the directories from Edit->Preferences->GetExtensions->Repositories. You can look it up by clicking one of the local repositories and going to Advanced. There You can look up custom directory property.
+
+Once installed and You found the installation directory, You can edit the addon there. Once edited, You have to reload addon in Blender by clicking F3 and from menu select "Reload Scripts". If You wish to have version control, You can copy .git directory to addon installation directory (yea I know it's rough and probably can be done in better way).
+
+
+## TODOs:
+
+ - [ ] Don't allow removal of all rows in action mixer - if user doesn't want animaction it should be just left to "None"
+ - [ ] Camera position restoring is not working
