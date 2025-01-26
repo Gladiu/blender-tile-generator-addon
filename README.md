@@ -19,3 +19,4 @@ Once installed and You found the installation directory, You can edit the addon 
 
  - [ ] Don't allow removal of all rows in action mixer - if user doesn't want animaction it should be just left to "None"
  - [ ] Camera position restoring is not working
+ - [ ] When **no** material is added to the object (only default one is present), addon throws an error
