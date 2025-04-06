@@ -34,13 +34,13 @@ def _get_actions_names(_1, _2):
 
 class ActionsMixerRow(bpy.types.PropertyGroup):
     character_action_name: bpy.props.EnumProperty(
-        name="",
+        name="",# Name is described in label above
         description="Actions available in current scope",
         items=_get_actions_names
     )
 
     prop_action_name: bpy.props.EnumProperty(
-        name="",
+        name="",# Name is described in label above
         description="Actions available in current scope",
         items=_get_actions_names
     )

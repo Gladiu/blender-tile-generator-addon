@@ -39,7 +39,7 @@ def read_image(inputPath):
 
 class Emet_Properties(bpy.types.PropertyGroup):
     output_directory: bpy.props.StringProperty(
-        name = "Output directory",
+        name = "",# Name is described in label above
         description="Choose output directory",
         default = ".",
         maxlen=1024,
@@ -47,7 +47,7 @@ class Emet_Properties(bpy.types.PropertyGroup):
     )
 
     output_filename: bpy.props.StringProperty(
-        name="Output file name",
+        name="",# Name is described in label above
         description="Output file prefix",
         default="output.png",
         maxlen=1024,
@@ -263,7 +263,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
 
 class Emet_Tiles_Panel(bpy.types.Panel):
-    bl_label = "Tiles"
+    bl_label = "Renderer Panel"
     bl_category = "Emet Utils"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -274,9 +274,10 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         scene = context.scene
         EmetTool = scene.EmetTool
 
-        layout.label(text="Select objects to pick materials")
         layout.prop(EmetTool, "rotations")
+        layout.label(text="Output File name")
         layout.prop(EmetTool, "output_filename")
+        layout.label(text="Output Directory")
         layout.prop(EmetTool, "output_directory")
 
         layout.operator(Emet_Render_Tiles_Operator.bl_idname, text="Render Tiles", icon="SCENE")
