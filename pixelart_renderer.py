@@ -79,7 +79,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.context = None
         self.scene = None
         self.emet_tool = None
-        self.matselcoll = None
         self.actions_prop_coll = None
         self.camera = None
         self.camera_location_cache = None
@@ -99,7 +98,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.context = context
         self.scene = context.scene
         self.emet_tool = self.scene.EmetTool
-        self.matselcoll = self.scene.MatSelColl
         self.actions_prop_coll = self.scene.ActionsPropColl
 
         try:
@@ -123,11 +121,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
 
     def _render(self):
-        # Apply materials
-        for member in self.matselcoll:
-            obj = bpy.context.scene.objects[member.name]
-            mat = bpy.data.materials[member.active_index_mat]
-            obj.data.materials[0] = mat
 
         # Setup camera
         x, y = self.camera.location.x, self.camera.location.y
@@ -136,11 +129,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.camera.location.y = 0
         self.camera.rotation_euler[2] = math.pi / 2
         camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
-
-        # Main rendering loop
-        for member in self.matselcoll:
-            obj = bpy.context.scene.objects[member.name]
-            mat = bpy.data.materials[member.active_index_mat]
 
         for actions_mixer_row in self.actions_prop_coll:
             is_animated = self._set_animations(actions_mixer_row)
