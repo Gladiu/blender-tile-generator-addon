@@ -34,13 +34,13 @@ def _get_actions_names(_1, _2):
 
 class ActionsMixerRow(bpy.types.PropertyGroup):
     character_action_name: bpy.props.EnumProperty(
-        name="Action name",
+        name="",
         description="Actions available in current scope",
         items=_get_actions_names
     )
 
     prop_action_name: bpy.props.EnumProperty(
-        name="Action name",
+        name="",
         description="Actions available in current scope",
         items=_get_actions_names
     )
@@ -58,20 +58,19 @@ class ActionsMixerPanel(bpy.types.Panel):
         layout = self.layout
         ActionsPropColl = context.scene.ActionsPropColl
 
-        row = self.layout.row(align=True)
-        row.prop(context.scene, "CharacterPointer", text="Character")
-        row.prop(context.scene, "PropPointer", text="Prop")
         grid = layout.grid_flow(row_major=True, columns=2, align=True)
-        grid.label(text="Character action name")
-        grid.label(text="Prop action name")
-        grid.label(text="Frame start")
-        grid.label(text="Frame end")
+        grid.label(text="Object name")
+        grid.label(text="Object name")
+        grid.prop(context.scene, "CharacterPointer", text="")
+        grid.prop(context.scene, "PropPointer", text="")
+        grid.label(text="Action name")
+        grid.label(text="Action name")
         for member in ActionsPropColl:
             grid.prop(member, "character_action_name")
             grid.prop(member, "prop_action_name")
         row = layout.row()
-        row.operator(ActionsMixerAddRow.bl_idname, text="Add row", icon="SCENE")
-        row.operator(ActionsMixerRemoveRow.bl_idname, text="Remove row", icon="SCENE")
+        row.operator(ActionsMixerAddRow.bl_idname, text="Add row", icon="ADD")
+        row.operator(ActionsMixerRemoveRow.bl_idname, text="Remove row", icon="REMOVE")
 
 
 class ActionsMixerAddRow(bpy.types.Operator):

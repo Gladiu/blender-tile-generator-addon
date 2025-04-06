@@ -38,12 +38,6 @@ def read_image(inputPath):
 
 
 class Emet_Properties(bpy.types.PropertyGroup):
-    isAnimated : bpy.props.BoolProperty(
-        name = "Is Animated?",
-        description="Is tile animated",
-        default = False,
-    )
-
     output_directory: bpy.props.StringProperty(
         name = "Output directory",
         description="Choose output directory",
@@ -282,7 +276,6 @@ class Emet_Tiles_Panel(bpy.types.Panel):
 
         layout.label(text="Select objects to pick materials")
         layout.prop(EmetTool, "rotations")
-        layout.prop(EmetTool, "isAnimated")
         layout.prop(EmetTool, "output_filename")
         layout.prop(EmetTool, "output_directory")
 
