@@ -38,14 +38,8 @@ def read_image(inputPath):
 
 
 class Emet_Properties(bpy.types.PropertyGroup):
-    isAnimated : bpy.props.BoolProperty(
-        name = "Is Animated?",
-        description="Is tile animated",
-        default = False,
-    )
-
     output_directory: bpy.props.StringProperty(
-        name = "Output directory",
+        name = "",# Name is described in label above
         description="Choose output directory",
         default = ".",
         maxlen=1024,
@@ -53,7 +47,7 @@ class Emet_Properties(bpy.types.PropertyGroup):
     )
 
     output_filename: bpy.props.StringProperty(
-        name="Output file name",
+        name="",# Name is described in label above
         description="Output file prefix",
         default="output.png",
         maxlen=1024,
@@ -79,7 +73,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.context = None
         self.scene = None
         self.emet_tool = None
-        self.matselcoll = None
         self.actions_prop_coll = None
         self.camera = None
         self.camera_location_cache = None
@@ -99,7 +92,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.context = context
         self.scene = context.scene
         self.emet_tool = self.scene.EmetTool
-        self.matselcoll = self.scene.MatSelColl
         self.actions_prop_coll = self.scene.ActionsPropColl
 
         try:
@@ -123,11 +115,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
 
     def _render(self):
-        # Apply materials
-        for member in self.matselcoll:
-            obj = bpy.context.scene.objects[member.name]
-            mat = bpy.data.materials[member.active_index_mat]
-            obj.data.materials[0] = mat
 
         # Setup camera
         x, y = self.camera.location.x, self.camera.location.y
@@ -136,11 +123,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.camera.location.y = 0
         self.camera.rotation_euler[2] = math.pi / 2
         camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
-
-        # Main rendering loop
-        for member in self.matselcoll:
-            obj = bpy.context.scene.objects[member.name]
-            mat = bpy.data.materials[member.active_index_mat]
 
         for actions_mixer_row in self.actions_prop_coll:
             is_animated = self._set_animations(actions_mixer_row)
@@ -281,7 +263,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
 
 class Emet_Tiles_Panel(bpy.types.Panel):
-    bl_label = "Tiles"
+    bl_label = "Renderer Panel"
     bl_category = "Emet Utils"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -292,10 +274,10 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         scene = context.scene
         EmetTool = scene.EmetTool
 
-        layout.label(text="Select objects to pick materials")
         layout.prop(EmetTool, "rotations")
-        layout.prop(EmetTool, "isAnimated")
+        layout.label(text="Output File name")
         layout.prop(EmetTool, "output_filename")
+        layout.label(text="Output Directory")
         layout.prop(EmetTool, "output_directory")
 
         layout.operator(Emet_Render_Tiles_Operator.bl_idname, text="Render Tiles", icon="SCENE")
