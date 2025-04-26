@@ -1,6 +1,6 @@
 import bpy
 import math
-import random
+from copy import deepcopy
 import datetime
 
 # ------------------------------------------------------------------------
@@ -11,6 +11,10 @@ import cv2
 from pathlib import Path
 import os
 import numpy as np
+
+# Globuls
+animation_render = "0"
+tile_render = "1"
 
 
 def combine_frames(inputPath, prefix):
@@ -36,8 +40,7 @@ def read_image(inputPath):
     image = cv2.imread(path, cv2.IMREAD_UNCHANGED)
     return image
 
-
-class Emet_Properties(bpy.types.PropertyGroup):
+class EMET_properties(bpy.types.PropertyGroup):
     output_directory: bpy.props.StringProperty(
         name = "",# Name is described in label above
         description="Choose output directory",
@@ -61,30 +64,65 @@ class Emet_Properties(bpy.types.PropertyGroup):
         min = 1,
         max = 8
     )
+    render_types = [
+                (animation_render,"Animation Render","Animation Render"),
+                (tile_render,"Tile Render","Tile Render"),
+                ]
+
+    selected_render: bpy.props.EnumProperty(name="", # Name is described in label above
+                                     description="Selected Render Mode",
+                                     default="0",
+                                     items=render_types)
 
 
-class Emet_Render_Tiles_Operator(bpy.types.Operator):
-    bl_idname = "emet.emet_render_tiles_operator"
-    bl_label = "Render Tiles"
+def set_bool_in_geometry_nodes(object, bool_name, value):
+    if 'GeometryNodes' in object.modifiers.keys():
+        nodes = object.modifiers['GeometryNodes'].node_group.nodes
+        for node_key in nodes.keys():
+            if nodes[node_key].label == bool_name:
+                enable_in_shadow_render = nodes[node_key]
+                enable_in_shadow_render.boolean = value
+                return
+    else:
+        raise ValueError("No Geometry Nodes in object!")
+
+def set_set_material_params_geometry_nodes(object, set_material_name, mute_value, default_material):
+    if 'GeometryNodes' in object.modifiers.keys():
+        nodes = object.modifiers['GeometryNodes'].node_group.nodes
+        for node_key in nodes.keys():
+            if nodes[node_key].label == set_material_name:
+                shadow_material_setter = nodes[node_key]
+                shadow_material_setter.mute = mute_value
+                if default_material != None:
+                    shadow_material_setter.inputs['Material'].default_value = default_material
+                return
+    else:
+        raise ValueError("No Geometry Nodes in object!")
+        
+
+class EMET_OT_render_tiles_operator(bpy.types.Operator):
+    bl_idname =  "emet.render_tiles_operator"
+    bl_label = "Render"
     bl_options = {'REGISTER', 'UNDO'}
 
-
-    def __init__(self) -> None:
-        self.context = None
-        self.scene = None
-        self.emet_tool = None
-        self.actions_prop_coll = None
-        self.camera = None
-        self.camera_location_cache = None
-        self.camera_rotation_cache = None
-        self.output_directory = None
-        self.output_tmp_directory = None
-        self.output_tmp_tiles_directory = None
-        self.output_tmp_strips_directory = None
-        self.output_tmp_filename = None
-        self.TILE_PREFIX = "tmp_tile"
-        self.STRIP_PREFIX = "tmp_hstrip"
-        self.render_out = []
+    context = None
+    scene = None
+    emet_tool = None
+    actions_prop_coll = None
+    camera = None
+    camera_location_cache = None
+    camera_rotation_cache = None
+    output_directory = None
+    output_tmp_directory = None
+    output_tmp_tiles_directory = None
+    output_tmp_strips_directory = None
+    output_tmp_background_directory = None
+    output_tmp_shadow_directory = None
+    output_tmp_foreground_directory = None
+    output_tmp_filename = None
+    TILE_PREFIX = "tmp_tile"
+    STRIP_PREFIX = "tmp_hstrip"
+    render_out = []
 
 
     def execute(self, context):
@@ -93,7 +131,6 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.scene = context.scene
         self.emet_tool = self.scene.EmetTool
         self.actions_prop_coll = self.scene.ActionsPropColl
-
         try:
             self._setup_camera()
             self._setup_filepaths()
@@ -102,10 +139,16 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
             return {"CANCELLED"}
 
         try:
-            self._render()
-            os.rmdir(self.output_tmp_directory)
-            self.camera.location = self.camera_location_cache
-            self.camera.rotation_euler = self.camera_rotation_cache
+            if self.emet_tool.selected_render == animation_render:
+                self._render_animation()
+                #os.rmdir(self.output_tmp_directory)
+            elif self.emet_tool.selected_render == tile_render:
+                self._render_tile()
+                #os.rmdir(self.output_tmp_directory)
+            
+            current_camera = self._get_render_camera()
+            current_camera.location = self.camera_location_cache
+            current_camera.rotation_euler = self.camera_rotation_cache
         except Exception as e:
             self.report({"ERROR"}, str(e))
             # At this point Blender data is surely modified so return FINISHED
@@ -114,7 +157,155 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         return {'FINISHED'}
 
 
-    def _render(self):
+    def _render_tile(self):
+        foreground_suffix = self.scene.TileMixer.foreground_suffix 
+        background_suffix = self.scene.TileMixer.background_suffix 
+        object_dict = self.context.scene.TileCollectionPointer.objects
+        object_dict.keys()
+        tile_dict = {} # Its key is tile index, and its value is name are objects belonging to this index
+        # This entire mental gymnastic is to allow multi character number to be an index
+        # As well as to allow trailing numbers in tile names
+        for key in object_dict.keys():
+            currently_parsed_key = ""
+            for char in key:
+                currently_parsed_key = currently_parsed_key + char
+                if len(currently_parsed_key) > 0 and currently_parsed_key.isdigit() == False:
+                    # Get to the point where our string was a number
+                    currently_parsed_key = currently_parsed_key[:-1]
+                    if currently_parsed_key == '':
+                        continue
+
+                    currently_parsed_index = int(currently_parsed_key)
+                    if currently_parsed_index not in tile_dict.keys():
+                        tile_dict[currently_parsed_index] = []
+                    # We dont check if value exists in this array since its impossible to have 2 same names in blender
+                    tile_dict[currently_parsed_index].append(object_dict[key])
+                    break
+        
+        # Now we have a dictionary where key is index, and value are names of the nodes to render
+
+        # Sort by key
+        tile_dict = dict(sorted(tile_dict.items()))
+
+        # Hide all objects
+        for key in tile_dict.keys():
+            current_tile = tile_dict[key]
+            for object in current_tile:
+                object.hide_render = True
+        # Render 
+        for key in tile_dict.keys():
+            current_tile = tile_dict[key]
+            for object in current_tile:
+                object.hide_render = False
+                # Move camera position vector
+                object_x = object.location.x
+                object_y = object.location.y
+                self.camera.location.x = self.camera_location_cache.x + object_x 
+                self.camera.location.y = self.camera_location_cache.y + object_y 
+
+                # Lets determine if we render Background or foreground
+                if background_suffix in object.name:
+                    for temp_object in current_tile:
+                        if 'GeometryNodes' in temp_object.modifiers.keys():
+                            set_bool_in_geometry_nodes(temp_object, 'enable_in_background_render', True)
+                    self.scene.render.filepath = os.path.abspath(os.path.join(self.output_tmp_background_directory, str(key)))
+                    
+                if foreground_suffix in object.name:
+                    for temp_object in current_tile:
+                        if 'GeometryNodes' in temp_object.modifiers.keys():
+                            set_bool_in_geometry_nodes(temp_object, 'enable_in_foreground_render', True)
+                    self.scene.render.filepath = os.path.abspath(os.path.join(self.output_tmp_foreground_directory, str(key)))
+
+                bpy.ops.render.render(animation=False, write_still=True, use_viewport=False, layer='', scene='')
+                
+                # Cleanup
+                if background_suffix in object.name:
+                    for temp_object in current_tile:
+                        if 'GeometryNodes' in temp_object.modifiers.keys():
+                            set_bool_in_geometry_nodes(temp_object, 'enable_in_background_render', False)
+                    
+                if foreground_suffix in object.name:
+                    for temp_object in current_tile:
+                        if 'GeometryNodes' in temp_object.modifiers.keys():
+                            set_bool_in_geometry_nodes(temp_object, 'enable_in_foreground_render', False)
+
+                # Shadow Render
+                if background_suffix in object.name:
+                    object_material_slots = []
+                    for material in object.material_slots:
+                        object_material_slots.append(material.material)
+
+                    for temp_object in current_tile:
+                        if 'GeometryNodes' in temp_object.modifiers.keys():
+                            set_bool_in_geometry_nodes(temp_object, 'enable_in_shadow_render', True)
+                    self.scene.render.filepath = os.path.abspath(os.path.join(self.output_tmp_shadow_directory, str(key)))
+                    # Set Shadow Catcher Material
+                    if 'GeometryNodes' in object.modifiers.keys():
+                        set_set_material_params_geometry_nodes(object, 'enable_shadow_material', False, self.context.scene.TileShadowMaterialPointer )
+                    else:
+                        for material_slot in object.material_slots:
+                            material_slot.material = self.context.scene.TileShadowMaterialPointer
+
+                    # Find Foreground object
+                    foreground_object = None
+                    for currently_searched_object in current_tile:
+                        if foreground_suffix in currently_searched_object.name:
+                            foreground_object = currently_searched_object
+                    foreground_object_material_slots = []
+                    for material in foreground_object.material_slots:
+                        foreground_object_material_slots.append(material.material)
+
+                    # Unhide foreground object and set it transparent material
+                    if 'GeometryNodes' in foreground_object.modifiers.keys():
+                        set_set_material_params_geometry_nodes(object, 'enable_transparent_material', False, self.context.scene.TileTransparentMaterialPointer)
+                    else:
+                        for material_slot in object.material_slots:
+                            material_slot.material = self.context.scene.TileTransparentMaterialPointer
+                            
+                    foreground_object.hide_render = False
+
+                    bpy.ops.render.render(animation=False, write_still=True, use_viewport=False, layer='', scene='')
+
+                    # Cleanup
+                    for temp_object in current_tile:
+                        set_bool_in_geometry_nodes(temp_object, 'enable_in_shadow_render', False)
+
+                    # Main object cleanup
+                    if 'GeometryNodes' in object.modifiers.keys():
+                        set_set_material_params_geometry_nodes(object, 'enable_shadow_material', True, None )
+                    else:
+                        for index,item in enumerate(object_material_slots):
+                            object.material_slots[index] = item
+                        object.material_slots = object_material_slots
+
+                    # Foreground object cleanup
+                    if 'GeometryNodes' in foreground_object.modifiers.keys():
+                        set_set_material_params_geometry_nodes(object, 'enable_transparent_material', True, None)
+                    else:
+                        for index,item in enumerate(foreground_object_material_slots):
+                            foreground_object.material_slots[index] = item
+                    foreground_object.hide_render = True
+
+
+                object.hide_render = True
+
+        for key in tile_dict.keys():
+            current_tile = tile_dict[key]
+            for object in current_tile:
+                object.hide_render = False
+
+        background_renders = combine_frames( self.output_tmp_background_directory, '')
+        shadow_renders = combine_frames( self.output_tmp_shadow_directory, '')
+        foreground_renders = combine_frames( self.output_tmp_foreground_directory, '')
+        cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat([background_renders, shadow_renders, foreground_renders]))
+
+
+    def _render_animation(self):
+
+        # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
+        # with name prefix + tile number
+        self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_tiles_directory, self.TILE_PREFIX))
+        self.scene.render.filepath = self.output_tmp_filename
 
         # Setup camera
         x, y = self.camera.location.x, self.camera.location.y
@@ -212,8 +403,8 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
 
     def _setup_camera(self):
         self.camera = self._get_render_camera()
-        self.camera_location_cache = self.camera.location
-        self.camera_rotation_cache = self.camera.rotation_euler
+        self.camera_location_cache = deepcopy(self.camera.location)
+        self.camera_rotation_cache = deepcopy(self.camera.rotation_euler)
 
 
     def _setup_filepaths(self):
@@ -230,17 +421,19 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         self.output_tmp_directory = os.path.abspath(self.output_tmp_directory)
         self.output_tmp_tiles_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "tiles"))
         self.output_tmp_strips_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "strips"))
+        self.output_tmp_background_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "background"))
+        self.output_tmp_shadow_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "shadow"))
+        self.output_tmp_foreground_directory = os.path.abspath(os.path.join(self.output_tmp_directory, "foreground"))
         try:
             os.makedirs(self.output_tmp_directory, exist_ok=False)
             os.makedirs(self.output_tmp_strips_directory, exist_ok=False)
             os.makedirs(self.output_tmp_tiles_directory, exist_ok=False)
+            os.makedirs(self.output_tmp_background_directory, exist_ok=False)
+            os.makedirs(self.output_tmp_shadow_directory, exist_ok=False)
+            os.makedirs(self.output_tmp_foreground_directory, exist_ok=False)
         except:
             self.report({"ERROR"}, f"Could not create temp directories")
 
-        # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
-        # with name prefix + tile number
-        self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_tiles_directory, self.TILE_PREFIX))
-        self.scene.render.filepath = self.output_tmp_filename
 
 
     def _hstrips_cleanup(self):
@@ -262,7 +455,7 @@ class Emet_Render_Tiles_Operator(bpy.types.Operator):
         os.rmdir(path)
 
 
-class Emet_Tiles_Panel(bpy.types.Panel):
+class EMET_PT_tiles(bpy.types.Panel):
     bl_label = "Renderer Panel"
     bl_category = "Emet Utils"
     bl_space_type = "VIEW_3D"
@@ -279,19 +472,21 @@ class Emet_Tiles_Panel(bpy.types.Panel):
         layout.prop(EmetTool, "output_filename")
         layout.label(text="Output Directory")
         layout.prop(EmetTool, "output_directory")
+        layout.label(text="Selected Render Type")
+        layout.prop(EmetTool, "selected_render")
 
-        layout.operator(Emet_Render_Tiles_Operator.bl_idname, text="Render Tiles", icon="SCENE")
+        layout.operator(EMET_OT_render_tiles_operator.bl_idname, text="Render", icon="SCENE")
 
 
 classes = [
-    Emet_Properties, Emet_Render_Tiles_Operator, Emet_Tiles_Panel,
+    EMET_properties, EMET_OT_render_tiles_operator, EMET_PT_tiles,
 ]
 
 
 def register():
     for c in classes:
         bpy.utils.register_class(c)
-    bpy.types.Scene.EmetTool = bpy.props.PointerProperty(type=Emet_Properties)
+    bpy.types.Scene.EmetTool = bpy.props.PointerProperty(type=EMET_properties)
 
 
 def unregister():
