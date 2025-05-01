@@ -7,8 +7,6 @@ def register():
     bpy.utils.register_class(TilesMixerProperties)
     bpy.utils.register_class(TileMixerNodeOperator)
     bpy.types.Scene.TileCollectionPointer = bpy.props.PointerProperty(type=bpy.types.Collection)
-    bpy.types.Scene.TileShadowMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
-    bpy.types.Scene.TileTransparentMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
     bpy.types.Scene.TileMixer = bpy.props.PointerProperty(type=TilesMixerProperties)
 
 
@@ -35,21 +33,6 @@ class TilesMixerProperties(bpy.types.PropertyGroup):
         subtype='NONE'
     )
 
-    enable_in_background_render: bpy.props.BoolProperty(
-        name = "",# Name is described in label above
-        description="enable_in_background_render will be set to True during background rendering in Geometry Nodes and Materials",
-    )
-
-    enable_in_shadow_render: bpy.props.BoolProperty(
-        name = "",# Name is described in label above
-        description= "enable_in_shadow_render will be set to True during shadow rendering in Geometry Nodes and Materials",
-    )
-
-    enable_in_foreground_render: bpy.props.BoolProperty(
-        name = "",# Name is described in label above
-        description= "enable_in_foreground_render will be set to True during foreground rendering in Geometry Nodes and Materials",
-    )
-
 
 class TilesMixerPanel(bpy.types.Panel):
     bl_label = "Tiles Mixer Panel"
@@ -64,20 +47,11 @@ class TilesMixerPanel(bpy.types.Panel):
         TileMixer = context.scene.TileMixer
 
         layout.prop(context.scene , "TileCollectionPointer", text="")
-        layout.label(text="Shadow Material")
-        layout.prop(context.scene , "TileShadowMaterialPointer" , text="")
-        layout.label(text="Transparent Material")
-        layout.prop(context.scene , "TileTransparentMaterialPointer" , text="")
-
 
         layout.label(text="Foreground object suffix")
         layout.prop(TileMixer, "foreground_suffix", text="")
         layout.label(text="Background object suffix")
         layout.prop(TileMixer, "background_suffix", text="")
-
-        layout.prop(TileMixer, "enable_in_background_render", text="Use enable_in_background_render")
-        layout.prop(TileMixer, "enable_in_shadow_render", text="Use enable_in_shadow_render")
-        layout.prop(TileMixer, "enable_in_foreground_render", text="Use enable_in_foreground_render")
 
 class TileMixerNodeOperator(bpy.types.Operator):
     bl_idname = "tile_mixer.operator"
@@ -87,25 +61,25 @@ class TileMixerNodeOperator(bpy.types.Operator):
     def execute(self, context):
         if 'GeometryNodes' not in context.object.modifiers.keys():
             return {'FINISHED'}
-        node_tree = context.object.modifiers['GeometryNodes'].node_group.nodes
+        node_object = context.object.modifiers['GeometryNodes'].node_group.nodes
 
-        new_node = node_tree.new("FunctionNodeInputBool")
+        new_node = node_object.new("FunctionNodeInputBool")
         new_node.label = "enable_in_background_render"
         new_node.location.y += 100
 
-        new_node = node_tree.new("FunctionNodeInputBool")
+        new_node = node_object.new("FunctionNodeInputBool")
         new_node.label = "enable_in_shadow_render"
 
-        new_node = node_tree.new("FunctionNodeInputBool")
+        new_node = node_object.new("FunctionNodeInputBool")
         new_node.label = "enable_in_foreground_render"
         new_node.location.y += -100
         
-        new_node = node_tree.new("GeometryNodeSetMaterial")
+        new_node = node_object.new("GeometryNodeSetMaterial")
         new_node.label = "enable_shadow_material"
         new_node.location.x += -300
         new_node.mute = True
 
-        new_node = node_tree.new("GeometryNodeSetMaterial")
+        new_node = node_object.new("GeometryNodeSetMaterial")
         new_node.label = "enable_transparent_material"
         new_node.location.x += 300
         new_node.mute = True

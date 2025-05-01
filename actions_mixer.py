@@ -9,14 +9,8 @@ def register():
 
     # TODO: Change name!
     bpy.types.Scene.ActionsPropColl = bpy.props.CollectionProperty(type=ActionsMixerRow)
-    bpy.types.Scene.CharacterPointer = bpy.props.PointerProperty(
-        type=bpy.types.Object,
-        poll=lambda _, obj: obj.type == "ARMATURE", # Filter to only allow armatures
-    )
-    bpy.types.Scene.PropPointer = bpy.props.PointerProperty(
-        type=bpy.types.Object,
-        poll=lambda _, obj: obj.type == "ARMATURE", # Filter to only allow armatures
-    )
+    bpy.types.Scene.CharacterPointer = bpy.props.PointerProperty(type=bpy.types.Object)
+    bpy.types.Scene.PropPointer = bpy.props.PointerProperty(type=bpy.types.Object)
 
 
 def unregister():

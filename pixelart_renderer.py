@@ -41,6 +41,12 @@ def read_image(inputPath):
     return image
 
 class EMET_properties(bpy.types.PropertyGroup):
+
+    enable_bg_fg_render: bpy.props.BoolProperty(
+        name="Foreground & background render",# Name is described in label above
+        description="IN GEOMETRY NODES Divide render result for foreground and background render",
+    )
+
     output_directory: bpy.props.StringProperty(
         name = "",# Name is described in label above
         description="Choose output directory",
@@ -241,10 +247,10 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                     self.scene.render.filepath = os.path.abspath(os.path.join(self.output_tmp_shadow_directory, str(key)))
                     # Set Shadow Catcher Material
                     if 'GeometryNodes' in object.modifiers.keys():
-                        set_set_material_params_geometry_nodes(object, 'enable_shadow_material', False, self.context.scene.TileShadowMaterialPointer )
+                        set_set_material_params_geometry_nodes(object, 'enable_shadow_material', False, self.context.scene.ShadowMaterialPointer )
                     else:
                         for material_slot in object.material_slots:
-                            material_slot.material = self.context.scene.TileShadowMaterialPointer
+                            material_slot.material = self.context.scene.ShadowMaterialPointer
 
                     # Find Foreground object
                     foreground_object = None
@@ -257,10 +263,10 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
                     # Unhide foreground object and set it transparent material
                     if 'GeometryNodes' in foreground_object.modifiers.keys():
-                        set_set_material_params_geometry_nodes(object, 'enable_transparent_material', False, self.context.scene.TileTransparentMaterialPointer)
+                        set_set_material_params_geometry_nodes(object, 'enable_transparent_material', False, self.context.scene.TransparentMaterialPointer)
                     else:
                         for material_slot in object.material_slots:
-                            material_slot.material = self.context.scene.TileTransparentMaterialPointer
+                            material_slot.material = self.context.scene.TransparentMaterialPointer
                             
                     foreground_object.hide_render = False
 
@@ -302,37 +308,61 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
     def _render_animation(self):
 
+        render_object = self.scene.CharacterPointer
+        bg_fg_enabled = self.emet_tool.enable_bg_fg_render
+    
         # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
         # with name prefix + tile number
         self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_tiles_directory, self.TILE_PREFIX))
         self.scene.render.filepath = self.output_tmp_filename
+        
+        render_types = ['Single Render']
+        if bg_fg_enabled:
+            render_types = ['Background', 'Foreground']
 
-        # Setup camera
-        x, y = self.camera.location.x, self.camera.location.y
-        camera_vector_mag = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
-        self.camera.location.x = camera_vector_mag * 1 # Yes this is very verbose - sue me
-        self.camera.location.y = 0
-        self.camera.rotation_euler[2] = math.pi / 2
-        camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
+        # We will store background render and foreground renders here
+        render_target = []
+        for render_type in render_types:
 
-        for actions_mixer_row in self.actions_prop_coll:
-            is_animated = self._set_animations(actions_mixer_row)
-            # Render rotations
-            for _ in range(0, self.emet_tool.rotations):
-                # Rotate camera around it's Z axis
-                self.camera.rotation_euler[2] += camera_rotation_angle
+            if render_type == 'Background' and 'GeometryNodes' in render_object.modifiers.keys():
+                set_bool_in_geometry_nodes(render_object, 'enable_in_background_render', True)
+            if render_type == 'Foreground' and 'GeometryNodes' in render_object.modifiers.keys():
+                set_bool_in_geometry_nodes(render_object, 'enable_in_foreground_render', True)
+            # Setup camera
+            x, y = self.camera.location.x, self.camera.location.y
+            camera_vector_mag = math.sqrt(math.pow(x, 2) + math.pow(y, 2))
+            self.camera.location.x = camera_vector_mag * 1 # Yes this is very verbose - sue me # Its cute but it wont stop my sphagetti
+            self.camera.location.y = 0
+            self.camera.rotation_euler[2] = math.pi / 2
+            camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
 
-                # Rotate camera position vector
-                x, y = self.camera.location.x, self.camera.location.y
-                self.camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
-                self.camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
+            for actions_mixer_row in self.actions_prop_coll:
+                is_animated = self._set_animations(actions_mixer_row)
+                # Render rotations
+                for _ in range(0, self.emet_tool.rotations):
+                    # Rotate camera around it's Z axis
+                    self.camera.rotation_euler[2] += camera_rotation_angle
 
-                self._render_hstrip(is_animated)
-                self._tiles_cleanup()
+                    # Rotate camera position vector
+                    x, y = self.camera.location.x, self.camera.location.y
+                    self.camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
+                    self.camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
+                    self._render_hstrip(is_animated)
+                    #self._tiles_cleanup()
 
-        # Save to sprite sheet
-        self._hstrips_stack()
+            # Save to sprite sheet
+            if render_type == 'Background' and 'GeometryNodes' in render_object.modifiers.keys():
+                set_bool_in_geometry_nodes(render_object, 'enable_in_background_render', False)
+            if render_type == 'Foreground' and 'GeometryNodes' in render_object.modifiers.keys():
+                set_bool_in_geometry_nodes(render_object, 'enable_in_foreground_render', False)
+
+            render_target.append(self._hstrips_stack())
         self._hstrips_cleanup()
+        
+        if bg_fg_enabled:
+            cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(render_target[1:])) # Why is there one? idk it works dont touch
+        else:
+            cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(render_target))
 
 
     def _hstrips_stack(self):
@@ -348,7 +378,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             blank = np.zeros((h, max_w, d), strip.dtype)
             blank[0:h, 0:w] = strip
             strips[i] = blank
-        cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(strips))
+        return cv2.vconcat(strips)
 
 
     def _set_animations(self, actions_mixer_row):
@@ -357,7 +387,12 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         is_animated = False
         character_frame_end = 0
         prop_frame_end = 0
-        if actions_mixer_row.character_action_name in bpy.data.actions \
+        if character_armature.type != 'ARMATURE' \
+                and actions_mixer_row.character_action_name in bpy.data.actions \
+                and actions_mixer_row.character_action_name != "None":
+            is_animated = True
+            character_frame_end = bpy.data.actions[actions_mixer_row.character_action_name].frame_end
+        elif actions_mixer_row.character_action_name in bpy.data.actions \
                 and actions_mixer_row.character_action_name != "None" \
                 and character_armature.animation_data != None:
             character_armature.animation_data.action = bpy.data.actions[actions_mixer_row.character_action_name]
@@ -373,7 +408,6 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         if is_animated:
             self.scene.frame_start = 1
             self.scene.frame_end = int(character_frame_end if character_frame_end > prop_frame_end else prop_frame_end)
-
         return is_animated
 
 
@@ -385,7 +419,6 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             layer='',
             scene=''
         )
-
         hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
         hstrip_name = self.STRIP_PREFIX + str(len(os.listdir(self.output_tmp_strips_directory))) + ".png"
         hstrip_path = os.path.join(self.output_tmp_strips_directory, hstrip_name)
@@ -468,6 +501,11 @@ class EMET_PT_tiles(bpy.types.Panel):
         EmetTool = scene.EmetTool
 
         layout.prop(EmetTool, "rotations")
+        layout.prop(EmetTool, "enable_bg_fg_render")
+        layout.label(text="Shadow Catcher Material")
+        layout.prop(context.scene , "ShadowMaterialPointer" , text="")
+        layout.label(text="Transparent Material")
+        layout.prop(context.scene , "TransparentMaterialPointer" , text="")
         layout.label(text="Output File name")
         layout.prop(EmetTool, "output_filename")
         layout.label(text="Output Directory")
@@ -487,6 +525,8 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.Scene.EmetTool = bpy.props.PointerProperty(type=EMET_properties)
+    bpy.types.Scene.ShadowMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
+    bpy.types.Scene.TransparentMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
 
 
 def unregister():
