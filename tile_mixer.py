@@ -17,17 +17,17 @@ def unregister():
     bpy.utils.unregister_class(TileMixerNodeOperator)
 
 class TilesMixerProperties(bpy.types.PropertyGroup):
-    foreground_suffix: bpy.props.StringProperty(
+    foreground_affix: bpy.props.StringProperty(
         name="",# Name is described in label above
-        description="Foreground Object suffix",
+        description="Foreground Object affix",
         default="FG",
         maxlen=1024,
         subtype='NONE'
     )
 
-    background_suffix: bpy.props.StringProperty(
+    background_affix: bpy.props.StringProperty(
         name="",# Name is described in label above
-        description="Background Object suffix",
+        description="Background Object affix",
         default="BG",
         maxlen=1024,
         subtype='NONE'
@@ -48,10 +48,10 @@ class TilesMixerPanel(bpy.types.Panel):
 
         layout.prop(context.scene , "TileCollectionPointer", text="")
 
-        layout.label(text="Foreground object suffix")
-        layout.prop(TileMixer, "foreground_suffix", text="")
-        layout.label(text="Background object suffix")
-        layout.prop(TileMixer, "background_suffix", text="")
+        layout.label(text="Foreground object affix")
+        layout.prop(TileMixer, "foreground_affix", text="")
+        layout.label(text="Background object affix")
+        layout.prop(TileMixer, "background_affix", text="")
 
 class TileMixerNodeOperator(bpy.types.Operator):
     bl_idname = "tile_mixer.operator"
