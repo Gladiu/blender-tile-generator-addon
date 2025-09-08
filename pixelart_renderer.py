@@ -16,18 +16,22 @@ import numpy as np
 animation_render = "0"
 tile_render = "1"
 
-
 def combine_frames(inputPath, prefix):
     # Get everything that is a file and starts with prefix from inputPath
     filepaths = []
     if len(os.listdir(inputPath)) == 0:
         return []
+    files = []
     for f in os.listdir(inputPath):
         fp = os.path.join(inputPath, f)
         if not os.path.isfile(fp) or not f.startswith(prefix):
             continue
-        filepaths.append(fp)
-    filepaths.sort()
+        files.append(f)
+    files.sort(key = lambda x:  return_smaller_affix(x, prefix))
+    # Add back .png
+    # This slicing of string could have been avoided if i bothered to write better sorting of paths
+    for f in files:
+        filepaths.append(os.path.join(inputPath, str(f)))
 
     images = [cv2.imread(filepath, cv2.IMREAD_UNCHANGED) for filepath in filepaths]
     return cv2.hconcat(images)
