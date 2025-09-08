@@ -9,14 +9,8 @@ def register():
 
     # TODO: Change name!
     bpy.types.Scene.ActionsPropColl = bpy.props.CollectionProperty(type=ActionsMixerRow)
-    bpy.types.Scene.CharacterPointer = bpy.props.PointerProperty(
-        type=bpy.types.Object,
-        poll=lambda _, obj: obj.type == "ARMATURE", # Filter to only allow armatures
-    )
-    bpy.types.Scene.PropPointer = bpy.props.PointerProperty(
-        type=bpy.types.Object,
-        poll=lambda _, obj: obj.type == "ARMATURE", # Filter to only allow armatures
-    )
+    bpy.types.Scene.CharacterPointer = bpy.props.PointerProperty(type=bpy.types.Object)
+    bpy.types.Scene.PropPointer = bpy.props.PointerProperty(type=bpy.types.Object)
 
 
 def unregister():
@@ -49,7 +43,7 @@ class ActionsMixerRow(bpy.types.PropertyGroup):
 class ActionsMixerPanel(bpy.types.Panel):
     bl_label = "Actions Mixer Panel"
     bl_category = "Emet Utils" # TODO: This should be changed
-    bl_idname = "SCENE_PT_ui_actions_mixer"
+    bl_idname = "actions_mixer.panel"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
     bl_options = {"DEFAULT_CLOSED"}
@@ -74,8 +68,6 @@ class ActionsMixerPanel(bpy.types.Panel):
 
 
 class ActionsMixerAddRow(bpy.types.Operator):
-    """
-    """
     bl_idname = "actions_mixer.add_row"
     bl_label = "Row Actions Mixer Add Operator"
     bl_options = {'REGISTER'}
