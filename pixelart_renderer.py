@@ -16,6 +16,11 @@ import numpy as np
 animation_render = "0"
 tile_render = "1"
 
+def return_smaller_affix(x, prefix):
+    # Cutting out: prefix, .png
+    # This leaves only number to be compared
+    return int(x[len(prefix):-4])
+
 def combine_frames(inputPath, prefix):
     # Get everything that is a file and starts with prefix from inputPath
     filepaths = []
@@ -118,6 +123,26 @@ def set_set_material_params_geometry_nodes(object, set_material_name, mute_value
     else:
         raise ValueError("No Geometry Nodes in object!")
         
+def set_holdout_to_object(object, holdout_state):
+    if object.type == 'ARMATURE':
+        for child in object.children:
+            child.is_holdout = holdout_state
+    else:
+        object.is_holdout = holdout_state
+
+def make_all_renders_same_width(render_array):
+    # Shaping different sizes of strips to have same size
+    max_w = 0
+    for py_strip in render_array:
+        strip = np.asarray(deepcopy(py_strip))
+        if strip.shape[1] > max_w:
+            max_w = strip.shape[1]
+    for i, strip in enumerate(render_array):
+        strip =  np.asarray(strip)
+        h, w, d = strip.shape
+        blank = np.zeros((h, max_w, d), strip.dtype)
+        blank[0:h, 0:w] = strip
+        render_array[i] = blank
 
 class EMET_OT_render_tiles_operator(bpy.types.Operator):
     bl_idname =  "emet.render_tiles_operator"
@@ -180,7 +205,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         foreground_affix = self.scene.TileMixer.foreground_affix 
         background_affix = self.scene.TileMixer.background_affix 
         object_dict = self.context.scene.TileCollectionPointer.objects
-        object_dict.keys()
+
         tile_dict = {} # Its key is tile index, and its value is name are objects belonging to this index
         # This entire mental gymnastic is to allow multi character number to be an index
         # As well as to allow trailing numbers in tile names
@@ -280,22 +305,45 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         self.output_tmp_filename = os.path.abspath(os.path.join(self.output_tmp_tiles_directory, self.TILE_PREFIX))
         self.scene.render.filepath = self.output_tmp_filename
         
+        for actions_mixer_row in self.actions_prop_coll:
+            prop_name = actions_mixer_row.prop_for_action_name
+            if prop_name != 'None': # KURWAAAAAA BLENDER HAS 'None' and None  # KURWAAA its not blender, its us in @ref action_mixer.py
+                bpy.data.objects[prop_name].hide_render = True
+
         render_types = ['Single Render']
         if bg_fg_enabled:
-            render_types = ['Background', 'Foreground']
+            render_types = ['Background', 'Foreground', 'Prop' ]
             # Reset Everything
             for node in bpy.data.node_groups:
                     set_bool_in_geometry_nodes(node, 'enable_in_background_render', False)
                     set_bool_in_geometry_nodes(node, 'enable_in_foreground_render', False)
 
         # We will store background render and foreground renders here
+
+        # TODO: Add option to split background and foreground to different files 
         render_target = []
+        # Key is prop name/file name and value is animation 
+        render_target_prop_anim = {} # Render target animation that has prop will be rendered separately
+        render_prop_anim = {} # Prop doing animation on its own
+        render_wearable = {}
+
+        # Main Loop
         for render_type in render_types:
+
             for node in bpy.data.node_groups:
                 if render_type == 'Background':
                     set_bool_in_geometry_nodes(node, 'enable_in_background_render', True)
                 if render_type == 'Foreground':
                     set_bool_in_geometry_nodes(node, 'enable_in_foreground_render', True)
+                if render_type == 'Prop':
+                    set_bool_in_geometry_nodes(node, 'enable_in_background_render', True)
+                    set_bool_in_geometry_nodes(node, 'enable_in_foreground_render', True)
+            if render_type == 'Prop':
+                set_holdout_to_object(render_object, True)
+            wearable_dict = self.context.scene.WearableCollectionPointer.objects
+            for key in wearable_dict.keys():
+                wearable = wearable_dict[key]
+                wearable.hide_render = True
 
             # Setup camera
             x, y = self.camera.location.x, self.camera.location.y
@@ -307,6 +355,13 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
             for actions_mixer_row in self.actions_prop_coll:
                 is_animated = self._set_animations(actions_mixer_row)
+                if actions_mixer_row.prop_for_action_name != 'None':
+                    current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
+                    if current_prop.name not in render_target_prop_anim.keys():
+                        render_target_prop_anim[current_prop.name] = []
+                        render_prop_anim[current_prop.name] = []
+
+
                 # Render rotations
                 for _ in range(0, self.emet_tool.rotations):
                     # Rotate camera around it's Z axis
@@ -316,45 +371,110 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                     x, y = self.camera.location.x, self.camera.location.y
                     self.camera.location.x = x * math.cos(camera_rotation_angle) - y * math.sin(camera_rotation_angle)
                     self.camera.location.y = x * math.sin(camera_rotation_angle) + y * math.cos(camera_rotation_angle)
-                    self._render_hstrip(is_animated)
-                    #self._tiles_cleanup()
-                    self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
 
-            # Save to sprite sheet
+                    if render_type != 'Prop':
+                        # Render H strip
+                        bpy.ops.render.render(
+                            animation=is_animated,
+                            write_still=True,
+                            use_viewport=False,
+                            layer='',
+                            scene=''
+                        )
+
+                        if actions_mixer_row.prop_for_action_name != 'None':
+                            # Save prop animation to different buffer
+                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                            render_target_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+
+                            # Now render for the prop alone
+                            current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
+                            current_prop.hide_render = False
+
+                            set_holdout_to_object(render_object, True)
+                            bpy.ops.render.render(
+                                animation=is_animated,
+                                write_still=True,
+                                use_viewport=False,
+                                layer='',
+                                scene=''
+                            )
+                            current_prop.hide_render = True
+                            set_holdout_to_object(render_object, False)
+                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                            render_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+                            self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                        else:
+                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                            render_target.append(hstrip)   
+                            self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+
+                    if render_type == 'Prop':
+                        wearable_dict = self.context.scene.WearableCollectionPointer.objects
+                        for key in wearable_dict.keys():
+                            wearable = wearable_dict[key]
+                            wearable.hide_render = False
+                            bpy.ops.render.render(
+                                animation=is_animated,
+                                write_still=True,
+                                use_viewport=False,
+                                layer='',
+                                scene=''
+                            )
+                            if wearable.name not in render_wearable.keys():
+                                render_wearable[wearable.name] = []
+                            wearable.hide_render = True
+                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                            render_wearable[key].append(hstrip)
+                            self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+
+
+            # Unset all nodes variables and all holdouts
             for node in bpy.data.node_groups:
                 if render_type == 'Background':
                     set_bool_in_geometry_nodes(node, 'enable_in_background_render', False)
                 if render_type == 'Foreground':
                     set_bool_in_geometry_nodes(node, 'enable_in_foreground_render', False)
+            if render_type == 'Prop':
+                set_holdout_to_object(render_object, False)
+                wearable_dict = self.context.scene.WearableCollectionPointer.objects
+                for key in wearable_dict.keys():
+                    wearable = wearable_dict[key]
+                    wearable.hide_render = False
 
-            render_target.append(self._hstrips_stack())
-        self._hstrips_cleanup()
+        make_all_renders_same_width(render_target)
+        render_target = cv2.vconcat(render_target)
+
+        # Finally concatenating everything into one strip
         
-        if bg_fg_enabled:
-            cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(render_target[1:])) # Why is there one? idk it works dont touch
-        else:
-            cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(render_target))
+        cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), render_target)
+        for key in render_target_prop_anim.keys():
+            if key != 'None':
+                current_array = render_target_prop_anim[key]
+                make_all_renders_same_width(current_array)
+                current_array = cv2.vconcat(current_array)
+                file_name = self.emet_tool.output_filename[:-4] + "_" + str(key) + ".png"
+                cv2.imwrite(os.path.join(self.output_directory, file_name), current_array)
 
+        for key in render_prop_anim.keys():
+            if key != 'None':
+                current_array = render_prop_anim[key]
+                make_all_renders_same_width(current_array)
+                current_array = cv2.vconcat(current_array)
+                file_name = str(key) + ".png"
+                cv2.imwrite(os.path.join(self.output_directory, file_name), current_array)
 
-    def _hstrips_stack(self):
-        strips_files = os.listdir(self.output_tmp_strips_directory)
-        strips_files.sort(key=lambda x: int(x.replace(self.STRIP_PREFIX, "").replace(".png", "")))
-        strips = [cv2.imread(os.path.join(self.output_tmp_strips_directory, filename), cv2.IMREAD_UNCHANGED) for filename in strips_files]
-        max_w = 0
-        for strip in strips:
-            if strip.shape[1] > max_w:
-                max_w = strip.shape[1]
-        for i, strip in enumerate(strips):
-            h, w, d = strip.shape
-            blank = np.zeros((h, max_w, d), strip.dtype)
-            blank[0:h, 0:w] = strip
-            strips[i] = blank
-        return cv2.vconcat(strips)
-
-
+        for key in render_wearable.keys():
+            if key != 'None':
+                current_array = render_wearable[key]
+                make_all_renders_same_width(current_array)
+                current_array = cv2.vconcat(current_array)
+                file_name = str(key) + ".png"
+                cv2.imwrite(os.path.join(self.output_directory, file_name), current_array)
+            
+        
     def _set_animations(self, actions_mixer_row):
         character_armature = self.scene.CharacterPointer
-        prop_armature = self.scene.PropPointer
         is_animated = False
         character_frame_end = 0
         prop_frame_end = 0
@@ -369,32 +489,11 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             character_armature.animation_data.action = bpy.data.actions[actions_mixer_row.character_action_name]
             character_frame_end = bpy.data.actions[actions_mixer_row.character_action_name].frame_end
             is_animated = True
-        if actions_mixer_row.prop_action_name in bpy.data.actions \
-                and actions_mixer_row.prop_action_name != "None" \
-                and prop_armature.animation_data != None:
-            prop_armature.animation_data.action = bpy.data.actions[actions_mixer_row.prop_action_name]
-            prop_frame_end = bpy.data.actions[actions_mixer_row.prop_action_name].frame_end
-            is_animated = True
 
         if is_animated:
             self.scene.frame_start = 1
             self.scene.frame_end = int(character_frame_end if character_frame_end > prop_frame_end else prop_frame_end)
         return is_animated
-
-
-    def _render_hstrip(self, is_animated):
-        bpy.ops.render.render(
-            animation=is_animated,
-            write_still=True,
-            use_viewport=False,
-            layer='',
-            scene=''
-        )
-        hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-        hstrip_name = self.STRIP_PREFIX + str(len(os.listdir(self.output_tmp_strips_directory))) + ".png"
-        hstrip_path = os.path.join(self.output_tmp_strips_directory, hstrip_name)
-        cv2.imwrite(hstrip_path, hstrip)
-
 
     def _get_render_camera(self):
         cameras = [ob for ob in self.context.scene.objects if ob.type == 'CAMERA']
@@ -438,12 +537,6 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         except:
             self.report({"ERROR"}, f"Could not create temp directories")
 
-
-
-    def _hstrips_cleanup(self):
-        self._cleanup(self.output_tmp_strips_directory, self.STRIP_PREFIX)
-
-
     def _tiles_cleanup(self):
         self._cleanup(self.output_tmp_background_directory, self.TILE_PREFIX)
         self._cleanup(self.output_tmp_foreground_directory, self.TILE_PREFIX)
@@ -458,7 +551,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 raise RuntimeError(error_msg)
             filepath = os.path.join(path, tmp_file)
             os.remove(filepath)
-        os.rmdir(path)
+        #os.rmdir(path)
 
 
 class EMET_PT_tiles(bpy.types.Panel):
@@ -475,10 +568,11 @@ class EMET_PT_tiles(bpy.types.Panel):
 
         layout.prop(EmetTool, "rotations")
         layout.prop(EmetTool, "enable_bg_fg_render")
-        layout.label(text="Shadow Catcher Material")
-        layout.prop(context.scene , "ShadowMaterialPointer" , text="")
-        layout.label(text="Transparent Material")
-        layout.prop(context.scene , "TransparentMaterialPointer" , text="")
+        # Commenting this out, maybe this will be usefull in future
+        #layout.label(text="Shadow Catcher Material")
+        #layout.prop(context.scene , "ShadowMaterialPointer" , text="")
+        #layout.label(text="Transparent Material")
+        #layout.prop(context.scene , "TransparentMaterialPointer" , text="")
         layout.label(text="Output File name")
         layout.prop(EmetTool, "output_filename")
         layout.label(text="Output Directory")
