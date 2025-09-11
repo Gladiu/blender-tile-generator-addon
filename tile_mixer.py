@@ -74,16 +74,6 @@ class TileMixerNodeOperator(bpy.types.Operator):
         new_node.label = "enable_in_foreground_render"
         new_node.location.y += -100
         
-        new_node = node_object.new("GeometryNodeSetMaterial")
-        new_node.label = "enable_shadow_material"
-        new_node.location.x += -300
-        new_node.mute = True
-
-        new_node = node_object.new("GeometryNodeSetMaterial")
-        new_node.label = "enable_transparent_material"
-        new_node.location.x += 300
-        new_node.mute = True
-
         return bpy.ops.transform.translate('INVOKE_DEFAULT')
     
 class TilesMixerNodePanel(bpy.types.Panel):
