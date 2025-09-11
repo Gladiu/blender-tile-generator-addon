@@ -64,7 +64,7 @@ class ActionsMixerPanel(bpy.types.Panel):
 
         grid = layout.grid_flow(row_major=True, columns=2, align=True)
         grid.label(text="Object name")
-        grid.label(text="Props collection name")
+        grid.label(text="Props collection name (Cant be null)")
         grid.prop(context.scene, "CharacterPointer", text="")
         grid.prop(context.scene, "PropCollectionPointer", text="")
         row = layout.row()

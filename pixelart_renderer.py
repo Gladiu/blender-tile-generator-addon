@@ -312,12 +312,13 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
         render_types = ['Single Render']
         if bg_fg_enabled:
-            render_types = ['Background', 'Foreground', 'Prop' ]
+            render_types = ['Background', 'Foreground']
             # Reset Everything
             for node in bpy.data.node_groups:
                     set_bool_in_geometry_nodes(node, 'enable_in_background_render', False)
                     set_bool_in_geometry_nodes(node, 'enable_in_foreground_render', False)
-
+        if bpy.context.scene.WearableCollectionPointer is not None:
+            render_types.append('Prop')
         # We will store background render and foreground renders here
 
         # TODO: Add option to split background and foreground to different files 
@@ -340,10 +341,11 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                     set_bool_in_geometry_nodes(node, 'enable_in_foreground_render', True)
             if render_type == 'Prop':
                 set_holdout_to_object(render_object, True)
-            wearable_dict = self.context.scene.WearableCollectionPointer.objects
-            for key in wearable_dict.keys():
-                wearable = wearable_dict[key]
-                wearable.hide_render = True
+            if 'Prop' in render_types:
+                wearable_dict = self.context.scene.WearableCollectionPointer.objects
+                for key in wearable_dict.keys():
+                    wearable = wearable_dict[key]
+                    wearable.hide_render = True
 
             # Setup camera
             x, y = self.camera.location.x, self.camera.location.y
