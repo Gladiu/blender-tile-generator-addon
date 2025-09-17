@@ -388,24 +388,28 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                             # Save prop animation to different buffer
                             hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
                             render_target_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+                            if render_type == 'Background':
+                                # Save prop animation to different buffer
+                                hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                                render_target_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
 
-                            # Now render for the prop alone
-                            current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
-                            current_prop.hide_render = False
+                                # Now render for the prop alone
+                                current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
+                                current_prop.hide_render = False
 
-                            set_holdout_to_object(render_object, True)
-                            bpy.ops.render.render(
-                                animation=is_animated,
-                                write_still=True,
-                                use_viewport=False,
-                                layer='',
-                                scene=''
-                            )
-                            current_prop.hide_render = True
-                            set_holdout_to_object(render_object, False)
-                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                            render_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
-                            self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                                set_holdout_to_object(render_object, True)
+                                bpy.ops.render.render(
+                                    animation=is_animated,
+                                    write_still=True,
+                                    use_viewport=False,
+                                    layer='',
+                                    scene=''
+                                )
+                                current_prop.hide_render = True
+                                set_holdout_to_object(render_object, False)
+                                hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
+                                render_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+                                self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
                         else:
                             hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
                             render_target.append(hstrip)   
