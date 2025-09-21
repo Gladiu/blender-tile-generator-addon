@@ -371,6 +371,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
 
             for actions_mixer_row in self.actions_prop_coll:
+                action_name = actions_mixer_row.character_action_name
                 is_animated = self._set_animations(actions_mixer_row)
                 if actions_mixer_row.prop_for_action_name != 'None':
                     current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
@@ -453,7 +454,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                                 self.scene.frame_end = previous_frame_end 
 
                                 hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                                render_physics_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+                                render_physics_prop_anim[current_prop.name].append(hstrip)
                                 self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
 
                                 set_holdout_to_object(render_object, False)
