@@ -22,7 +22,8 @@ def unregister():
 
 
 def _get_actions_names(_1, _2):
-    action_names = [(x, x, "") for x in bpy.data.actions.keys()]
+    # Ad memorem to JS for helping me figure this out
+    action_names = [(x, x, "") for x in bpy.data.actions.keys() if "PREFIX_FOR_DELETION" not in x]
     action_names.insert(0, ("None", "None", ""))
     return action_names
 
