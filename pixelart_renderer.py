@@ -2,7 +2,16 @@ import bpy
 import math
 from copy import deepcopy
 import datetime
+import json
 
+import sys
+
+
+def handle_exc(exctype, value, tback):
+    lineno = tback.tb_lineno
+    print("Custom exception: Error on line", lineno)
+
+sys.excepthook = handle_exc
 # ------------------------------------------------------------------------
 #   Combine output images
 # ------------------------------------------------------------------------
@@ -162,15 +171,98 @@ def setup_animations(scene, character_pointer, prop_pointer, animation_name):
 def reset_animations(object):
     object.animation_data.action = None
 
-def create_files_from_dict(input_dict, prefix_filename, affix_filename, output_path, max_file_length):
-    for key in input_dict.keys():
-        if key != 'None':
-            current_array = input_dict[key]
-            make_all_renders_same_width(current_array)
-            current_array = cv2.vconcat(current_array)
-            file_name = prefix_filename + str(key) + affix_filename
-            cv2.imwrite(os.path.join(output_path, file_name), current_array)
+def create_json_from_dict(input_dict, bpy_data, scene, rotations, has_fg_bg, affix_filename, output_path, image_length_limit):
+    for file_name in input_dict.keys():
+        output_dict = {}
+        output_dict["frame_size_px"] = [0,0]
+        output_dict["frame_size_px"][0] = scene.render.resolution_x
+        output_dict["frame_size_px"][1] = scene.render.resolution_y
+        output_dict["rotations"] = rotations
+        output_dict["has_foreground_and_background"] = has_fg_bg
+        output_dict["data"] = {}
+        current_animation_index_x = 0
+        current_animation_index_y = 0
+        for action_name in input_dict[file_name].keys():
+            if action_name == 'None':
+                continue
+            output_dict["data"][action_name] = {}
+            output_dict["data"][action_name]["animation_length"] = bpy_data.actions[action_name].frame_end
+            current_action_height = 0
+            strip =  np.asarray(input_dict[file_name][action_name])
+            current_action_height, w, d = strip.shape
+            if current_animation_index_y*current_action_height + current_action_height > image_length_limit:
+                current_animation_index_x += 1
+                current_animation_index_y = 0
+                output_dict["data"][action_name]["animation_index_x"] = current_animation_index_x
+                output_dict["data"][action_name]["animation_index_y"] = current_animation_index_y
+                current_animation_index_y += 1
+            else:
+                output_dict["data"][action_name]["animation_index_x"] = current_animation_index_x
+                output_dict["data"][action_name]["animation_index_y"] = current_animation_index_y
+                current_animation_index_y += 1
+        out_file_name = str(file_name) + affix_filename + ".json"
+        output_json = os.path.join(output_path, out_file_name)
+        with open(output_json, 'w') as fp:
+            json.dump(output_dict, fp, indent=4)
 
+def create_images_from_dict(input_dict,affix_filename, output_path, max_file_length):
+
+    for file_name in input_dict.keys():
+        final_image = []
+        print("------------")
+        print(file_name)
+        print("------------")
+        max_strip_w = 0
+        max_strip_h = 0
+        for action_name in input_dict[file_name].keys():
+            if action_name == 'None':
+                continue
+            current_array = input_dict[file_name][action_name]
+            strip = np.asarray(current_array)
+            if strip.shape[1] > max_strip_w:
+                max_strip_w = strip.shape[1]
+        current_animation_index_x = 0
+        current_animation_index_y = 0
+        for action_name in input_dict[file_name].keys():
+            if action_name == 'None':
+                continue
+            current_array = input_dict[file_name][action_name]
+            strip =  np.asarray(current_array)
+            current_height, current_width, current_depth = strip.shape
+            extend_image_with_blank_to_size(current_array, [current_height, max_strip_w, current_depth])
+
+            print(action_name)
+
+            if len(final_image) == 0:
+                final_image = deepcopy(current_array)
+            if current_animation_index_y*current_height + current_height > max_file_length:
+                # Extend image to max_strip_h
+                current_animation_index_x += 1
+                current_animation_index_y = 0
+                final_image = extend_image_with_blank_to_size(final_image, [max_strip_h, max_strip_w*current_animation_index_x + max_strip_w, current_depth])
+                # Extend image to max_strip_w*current_animation_index_x
+                # Append current_action at 0 max_strip_w*current_animation_index_x d
+                final_image[ 0:current_height , current_animation_index_x*max_strip_w: current_animation_index_x*max_strip_w + current_width] = deepcopy(current_array)
+                current_animation_index_y += 1
+            else:
+                if current_animation_index_y*current_height + current_height > max_strip_h:
+                    max_strip_h = current_animation_index_y*current_height + current_height
+                final_image = extend_image_with_blank_to_size(final_image, [max_strip_h,  current_animation_index_x*max_strip_w + max_strip_w, current_depth])
+                strip =  np.asarray(final_image)
+                final_image[current_animation_index_y * current_height: current_animation_index_y * current_height + current_height , current_animation_index_x*max_strip_w: current_animation_index_x*max_strip_w + current_width ] = deepcopy(current_array)
+                current_animation_index_y += 1
+
+        out_file_name = str(file_name) + affix_filename
+        #final_image = np.asarray(final_image)
+        cv2.imwrite(os.path.join(output_path, out_file_name), final_image)
+    
+def extend_image_with_blank_to_size(image, desired_size):
+    strip =  np.asarray(image)
+    height, width, d = strip.shape
+    blank = np.zeros((desired_size[0], desired_size[1], desired_size[2]), strip.dtype)
+    blank[0:height, 0:width] = strip
+    image = blank
+    return deepcopy(image)
 # Those two functions exist because we cant set visibility for a collection
 def set_object_scale_to_zero(object):
     object.scale[0] = 0 
@@ -337,7 +429,10 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
         render_object = self.scene.CharacterPointer
         max_render_length = self.scene.MaxRenderLength
+        export_info_json = self.scene.OutputJsonExplainingRender
         bg_fg_enabled = self.emet_tool.enable_bg_fg_render
+        render_rotations = self.emet_tool.rotations
+        output_filename = self.emet_tool.output_filename[:-4]
     
         # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
         # with name prefix + tile number
@@ -365,14 +460,9 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             current_prop = None
             if actions_mixer_row.prop_for_action_name != 'None':
                 current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
-                if current_prop.name not in render_target_prop_anim.keys():
-                    render_target_prop_anim[current_prop.name] = []
-                    render_prop_anim[current_prop.name] = []
-                if is_36fps_render == True:
-                    render_physics_prop_anim[current_prop.name] = []
 
             # - Create 36fps versions of animations
-            if prop_name != 'None': # KURWAAAAAA BLENDER HAS 'None' and None  # KURWAAA its not blender, its us in @ref action_mixer.py
+            if current_prop != None: # KURWAAAAAA BLENDER HAS 'None' and None  # KURWAAA its not blender, its us in @ref action_mixer.py
                 set_object_scale_to_zero(bpy.data.objects[prop_name])
                 reset_animations(current_prop)
 
@@ -430,7 +520,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             self.camera.location.x = camera_vector_mag * 1 # Yes this is very verbose - sue me # Its cute but it wont stop my sphagetti
             self.camera.location.y = 0
             self.camera.rotation_euler[2] = math.pi / 2
-            camera_rotation_angle = math.pi * 2.0 / self.emet_tool.rotations
+            camera_rotation_angle = math.pi * 2.0 / render_rotations
 
             for actions_mixer_row in self.actions_prop_coll:
                 action_name = actions_mixer_row.character_action_name
@@ -444,7 +534,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
 
                 # Render rotations
-                for _ in range(0, self.emet_tool.rotations):
+                for _ in range(0, render_rotations):
                     # Rotate camera around it's Z axis
                     self.camera.rotation_euler[2] += camera_rotation_angle
 
@@ -466,16 +556,27 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
                         if current_prop == None:
                             hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                            if "player" not in render_target.keys():
-                                render_target["player"] = []
-                            render_target["player"].append(hstrip)
+                            # here output_filename is as constant to keep parity with other rendering dictionaries
+                            if output_filename not in render_target.keys():
+                                render_target[output_filename] = {}
+                            if action_name not in render_target[output_filename].keys():
+                                render_target[output_filename][action_name] = hstrip
+                            else:
+                                render_target[output_filename][action_name] = cv2.vconcat([render_target[output_filename][action_name], hstrip])
                             self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
 
                         else:
                             bpy.context.scene.PropCollectionPointer.hide_render = False
                             # Save prop animation to different buffer
                             hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                            render_target_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+                            render_target_key = output_filename + "_" + current_prop.name
+                            if render_target_key not in render_target_prop_anim.keys():
+                                render_target_prop_anim[render_target_key] = {}
+                            if action_name not in render_target_prop_anim[render_target_key].keys():
+                                render_target_prop_anim[render_target_key][action_name] = hstrip
+                            else:
+                                render_target_prop_anim[render_target_key][action_name] = cv2.vconcat([render_target_prop_anim[render_target_key][action_name], hstrip])
+
                             self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
 
                             if render_type == 'Background':
@@ -495,13 +596,17 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                                     scene=''
                                 )
                                 hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                                render_prop_anim[actions_mixer_row.prop_for_action_name].append(hstrip)
+                                if current_prop.name not in render_prop_anim.keys():
+                                    render_prop_anim[current_prop.name] = {}
+                                if action_name not in render_prop_anim[current_prop.name].keys():
+                                    render_prop_anim[current_prop.name][action_name] = hstrip
+                                else:
+                                    render_prop_anim[current_prop.name][action_name] = cv2.vconcat([render_prop_anim[current_prop.name][action_name], hstrip])
                                 self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
                                 if is_36fps_render == True:
                                     # Now render same prop for physics calculations
                                     previous_action = render_object.animation_data.action 
                                     previous_frame_end = self.scene.frame_end
-        
 
                                     current_prop.hide_render = False
                                     setup_animations(self.scene, render_object, current_prop, physics_animation_dictionary[action_name].name)
@@ -516,9 +621,13 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
                                     render_object.animation_data.action = previous_action
                                     self.scene.frame_end = previous_frame_end 
-
                                     hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                                    render_physics_prop_anim[current_prop.name].append(hstrip)
+                                    if current_prop.name not in render_physics_prop_anim.keys():
+                                        render_physics_prop_anim[current_prop.name] = {}
+                                    if action_name not in render_physics_prop_anim[current_prop.name].keys():
+                                        render_physics_prop_anim[current_prop.name][action_name] = hstrip
+                                    else:
+                                        render_physics_prop_anim[current_prop.name][action_name] = cv2.vconcat([render_physics_prop_anim[current_prop.name][action_name], hstrip])
                                     self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
 
                                 set_holdout_to_object(render_object, False)
@@ -543,16 +652,19 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                                 layer='',
                                 scene=''
                             )
+                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
                             if wearable.name not in render_wearable.keys():
-                                render_wearable[wearable.name] = []
+                                render_wearable[wearable.name] = {}
+                            if action_name not in render_wearable[wearable.name].keys():
+                                render_wearable[wearable.name][action_name] = hstrip
+                            else:
+                                render_wearable[wearable.name][action_name] = cv2.vconcat([render_wearable[wearable.name][action_name], hstrip])
 
                             reset_animations(wearable)
                             set_object_scale_to_zero(wearable)
                             set_holdout_to_object(render_object, False)
                             wearable.hide_render = True
 
-                            hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                            render_wearable[key].append(hstrip)
                             self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
                         self.context.scene.WearableCollectionPointer.hide_render = True
 
@@ -573,17 +685,30 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 prop_name = actions_mixer_row.prop_for_action_name
                 if prop_name != 'None': 
                     set_object_scale_to_one(bpy.data.objects[prop_name])
-
         if len(render_target.keys()) > 0:
-            create_files_from_dict(render_target, "", ".png", self.output_directory, max_render_length)
+            create_images_from_dict(render_target, ".png", self.output_directory, max_render_length)
+            if export_info_json:
+                create_json_from_dict(render_target, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+
         if len(render_target_prop_anim.keys()) > 0:
-            create_files_from_dict(render_target_prop_anim, self.emet_tool.output_filename[:-4] + "_", ".png", self.output_directory, max_render_length)
+            create_images_from_dict(render_target_prop_anim, ".png", self.output_directory, max_render_length)
+            if export_info_json:
+                create_json_from_dict(render_target_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+
         if len(render_physics_prop_anim.keys()) > 0:
-            create_files_from_dict(render_physics_prop_anim, "", "_36fps.png", self.output_directory, max_render_length)
+            create_images_from_dict(render_physics_prop_anim, "_36fps.png", self.output_directory, max_render_length)
+            if export_info_json:
+                create_json_from_dict(render_physics_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "_36fps", self.output_directory, max_render_length)
+
         if len(render_prop_anim.keys()) > 0:
-            create_files_from_dict(render_prop_anim, "", ".png", self.output_directory, max_render_length)
+            create_images_from_dict(render_prop_anim, ".png", self.output_directory, max_render_length)
+            if export_info_json:
+                create_json_from_dict(render_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+
         if len(render_wearable.keys()) > 0:
-            create_files_from_dict(render_wearable, "", ".png", self.output_directory, max_render_length)
+            create_images_from_dict(render_wearable, ".png", self.output_directory, max_render_length)
+            if export_info_json:
+                create_json_from_dict(render_wearable, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
             
         # Now we will delete unused actions:
         for key in bpy.data.actions.keys():
