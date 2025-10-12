@@ -698,17 +698,17 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         if len(render_physics_prop_anim.keys()) > 0:
             create_images_from_dict(render_physics_prop_anim, "_36fps.png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_physics_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "_36fps", self.output_directory, max_render_length)
+                create_json_from_dict(render_physics_prop_anim, bpy.data, self.scene, render_rotations, False, "_36fps", self.output_directory, max_render_length)
 
         if len(render_prop_anim.keys()) > 0:
             create_images_from_dict(render_prop_anim, ".png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+                create_json_from_dict(render_prop_anim, bpy.data, self.scene, render_rotations, False, "", self.output_directory, max_render_length)
 
         if len(render_wearable.keys()) > 0:
             create_images_from_dict(render_wearable, ".png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_wearable, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+                create_json_from_dict(render_wearable, bpy.data, self.scene, render_rotations, False, "", self.output_directory, max_render_length)
             
         # Now we will delete unused actions:
         for key in bpy.data.actions.keys():
