@@ -4,14 +4,6 @@ from copy import deepcopy
 import datetime
 import json
 
-import sys
-
-
-def handle_exc(exctype, value, tback):
-    lineno = tback.tb_lineno
-    print("Custom exception: Error on line", lineno)
-
-sys.excepthook = handle_exc
 # ------------------------------------------------------------------------
 #   Combine output images
 # ------------------------------------------------------------------------
@@ -24,6 +16,7 @@ import numpy as np
 # Globuls
 animation_render = "0"
 tile_render = "1"
+environment_render = "2"
 
 def return_smaller_affix(x, prefix):
     # Cutting out: prefix, .png
@@ -93,6 +86,7 @@ class EMET_properties(bpy.types.PropertyGroup):
     render_types = [
                 (animation_render,"Animation Render","Animation Render"),
                 (tile_render,"Tile Render","Tile Render"),
+                (environment_render,"Environment Render","Environment Render"),
                 ]
 
     selected_render: bpy.props.EnumProperty(name="", # Name is described in label above
@@ -209,9 +203,6 @@ def create_images_from_dict(input_dict,affix_filename, output_path, max_file_len
 
     for file_name in input_dict.keys():
         final_image = []
-        print("------------")
-        print(file_name)
-        print("------------")
         max_strip_w = 0
         max_strip_h = 0
         for action_name in input_dict[file_name].keys():
@@ -230,8 +221,6 @@ def create_images_from_dict(input_dict,affix_filename, output_path, max_file_len
             strip =  np.asarray(current_array)
             current_height, current_width, current_depth = strip.shape
             extend_image_with_blank_to_size(current_array, [current_height, max_strip_w, current_depth])
-
-            print(action_name)
 
             if len(final_image) == 0:
                 final_image = deepcopy(current_array)
@@ -305,24 +294,35 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         self.scene = context.scene
         self.emet_tool = self.scene.EmetTool
         self.actions_prop_coll = self.scene.ActionsPropColl
+        if self.scene.CameraCollectionPointer != None:
+            camera_dict = self.scene.CameraCollectionPointer.objects
         try:
-            self._setup_camera()
             self._setup_filepaths()
-        except:
-            # We can return CANCELLED because we didn't modifiy Blender data
-            return {"CANCELLED"}
-
-        try:
-            if self.emet_tool.selected_render == animation_render:
-                self._render_animation()
-                #os.rmdir(self.output_tmp_directory)
-            elif self.emet_tool.selected_render == tile_render:
-                self._render_tile()
-                #os.rmdir(self.output_tmp_directory)
+            target_cameras = []
+            if len(camera_dict.keys()) == 0:
+                cameras = [ob for ob in self.scene.objects if ob.type == 'CAMERA']
+                if 1 != len(cameras):
+                    error_msg = "There should only be one camera in the scene. If you want use more cameras setup camera collection"
+                    self.report({"ERROR"}, error_msg)
+                    raise ValueError(error_msg)
+                target_cameras.append(cameras[0])
+            else:
+                for camera_key in camera_dict.keys():
+                    if camera_dict[camera_key].type ==  'CAMERA':
+                        target_cameras.append(camera_dict[camera_key])
+            self.camera = target_cameras[0]
+            self._cache_camera_pos()
+            for idx,camera in enumerate(target_cameras):
+                self.camera = camera
+                if self.emet_tool.selected_render == animation_render:
+                    self._render_animation(idx)
+                elif self.emet_tool.selected_render == tile_render:
+                    self._render_tile(idx)
+                elif self.emet_tool.selected_render == environment_render:
+                    self._render_environment(idx)
             
-            current_camera = self._get_render_camera()
-            current_camera.location = self.camera_location_cache
-            current_camera.rotation_euler = self.camera_rotation_cache
+            self.camera.location = self.camera_location_cache
+            self.camera.rotation_euler = self.camera_rotation_cache
         except Exception as e:
             self.report({"ERROR"}, str(e))
             # At this point Blender data is surely modified so return FINISHED
@@ -330,11 +330,54 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
         return {'FINISHED'}
 
+    def _render_environment(self, iteration):
 
-    def _render_tile(self):
+        output_filename = self.emet_tool.output_filename[:-4]
+        if iteration > 0:
+            output_filename = f"{output_filename}_{iteration+1}"
+        render_stages = ["Background", "Collision", "Foreground"]
+        bool_map_for_stages = {render_stages[0] : "enable_in_background_render",
+                               render_stages[1] : "enable_in_collision_render",
+                               render_stages[2] : "enable_in_foreground_render",
+                                }
+        # Reset all nodes
+        for node in bpy.data.node_groups:
+                set_bool_in_geometry_nodes(node, "enable_in_background_render",False)
+                set_bool_in_geometry_nodes(node, "enable_in_collision_render" ,False)
+                set_bool_in_geometry_nodes(node, "enable_in_foreground_render",False)
+
+        # Main render loop
+        for stage in render_stages:
+            for node in bpy.data.node_groups:
+                    set_bool_in_geometry_nodes(node, bool_map_for_stages[stage], True)
+            self.scene.render.filepath = os.path.abspath(os.path.join(self.output_directory, f"{output_filename}_{stage}.png" ))
+
+            bpy.ops.render.render(animation=False, write_still=True, use_viewport=False, layer='', scene='')
+
+            for node in bpy.data.node_groups:
+                    set_bool_in_geometry_nodes(node, bool_map_for_stages[stage], False)
+
+        # Reset all nodes
+        for node in bpy.data.node_groups:
+                set_bool_in_geometry_nodes(node, "enable_in_background_render",False)
+                set_bool_in_geometry_nodes(node, "enable_in_collision_render" ,False)
+                set_bool_in_geometry_nodes(node, "enable_in_foreground_render",False)
+            
+
+        # Reset all nodes
+        for node in bpy.data.node_groups:
+                set_bool_in_geometry_nodes(node, "enable_in_background_render",False)
+                set_bool_in_geometry_nodes(node, "enable_in_collision_render" ,False)
+                set_bool_in_geometry_nodes(node, "enable_in_foreground_render",False)
+
+    def _render_tile(self, iteration):
         foreground_affix = self.scene.TileMixer.foreground_affix 
         background_affix = self.scene.TileMixer.background_affix 
         object_dict = self.context.scene.TileCollectionPointer.objects
+
+        output_filename = self.emet_tool.output_filename[:-4]
+        if iteration > 0:
+            output_filename = f"{output_filename}_{iteration+1}"
 
         tile_dict = {} # Its key is tile index, and its value is name are objects belonging to this index
         # This entire mental gymnastic is to allow multi character number to be an index
@@ -422,10 +465,10 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         if len(foreground_renders) != 0:
             render_array.append(foreground_renders)
 
-        cv2.imwrite(os.path.join(self.output_directory, self.emet_tool.output_filename), cv2.vconcat(render_array))
+        cv2.imwrite(os.path.join(self.output_directory, output_filename), cv2.vconcat(render_array))
 
 
-    def _render_animation(self):
+    def _render_animation(self,iteration):
 
         render_object = self.scene.CharacterPointer
         max_render_length = self.scene.MaxRenderLength
@@ -433,6 +476,8 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         bg_fg_enabled = self.emet_tool.enable_bg_fg_render
         render_rotations = self.emet_tool.rotations
         output_filename = self.emet_tool.output_filename[:-4]
+        if iteration > 0:
+            output_filename = f"{output_filename}_{iteration+1}"
     
         # We set render filepath to temp tiles directory + prefix. All intermediate tiles will be stored in temp directory,
         # with name prefix + tile number
@@ -452,7 +497,6 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         bpy.context.scene.PropCollectionPointer.hide_render = True
         for actions_mixer_row in self.actions_prop_coll:
             prop_name = actions_mixer_row.prop_for_action_name
-            action_name = actions_mixer_row.character_action_name
             # Setup Rendering Arrays
             action_name = actions_mixer_row.character_action_name
             is_36fps_render = actions_mixer_row.is_36fps_render
@@ -470,9 +514,14 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 physics_animation = bpy.data.actions[action_name].copy()
                 physics_animation.name = "PREFIX_FOR_DELETION" + physics_animation.name
                 # Make animation take 3 times longer
-                for curve in physics_animation.fcurves:
-                    for i, kfp in enumerate(curve.keyframe_points):
-                        kfp.co.x = kfp.co.x * 3
+                for slot in physics_animation.slots:
+                    slot.select = True
+                    for i,curve in enumerate(physics_animation.fcurves):
+                        for j, kfp in enumerate(curve.keyframe_points):
+                            physics_animation.fcurves[i].keyframe_points[j].co_ui.x = kfp.co_ui.x * 3.0
+                            physics_animation.fcurves[i].keyframe_points[j].interpolation = 'BEZIER'
+                            #kfp.co.x = kfp.co.x * 3
+                    slot.select = False
                 physics_animation.frame_end = physics_animation.frame_end * 3
                 physics_animation_dictionary[action_name] = physics_animation
         
@@ -716,22 +765,16 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 bpy.data.actions.remove(bpy.data.actions[key])
         
 
-    def _get_render_camera(self):
-        cameras = [ob for ob in self.context.scene.objects if ob.type == 'CAMERA']
-        if 1 != len(cameras):
-            error_msg = "There should only be one camera in the scene."
-            self.report({"ERROR"}, error_msg)
-            raise ValueError(error_msg)
-        return cameras[0]
 
-
-    def _setup_camera(self):
-        self.camera = self._get_render_camera()
+    def _cache_camera_pos(self):
         self.camera_location_cache = deepcopy(self.camera.location)
         self.camera_rotation_cache = deepcopy(self.camera.rotation_euler)
 
 
     def _setup_filepaths(self):
+        # This has to be nuked at one point, no reason we need so many temp dirs 
+
+
         # User provides output directory, which **must** exist. Here will be the output file placed
         if not os.path.exists(self.emet_tool.output_directory):
             error_msg = f"Output directory: {self.emet_tool.output_directory} does not exist!"
@@ -799,6 +842,8 @@ class EMET_PT_tiles(bpy.types.Panel):
         layout.prop(EmetTool, "output_directory")
         layout.label(text="Selected Render Type")
         layout.prop(EmetTool, "selected_render")
+        layout.label(text="Collection containing cameras to use for render")
+        layout.prop(context.scene,"CameraCollectionPointer" , text="")
 
         layout.operator(EMET_OT_render_tiles_operator.bl_idname, text="Render", icon="SCENE")
 
@@ -812,8 +857,9 @@ def register():
     for c in classes:
         bpy.utils.register_class(c)
     bpy.types.Scene.EmetTool = bpy.props.PointerProperty(type=EMET_properties)
-    bpy.types.Scene.ShadowMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
-    bpy.types.Scene.TransparentMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
+    #bpy.types.Scene.ShadowMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
+    #bpy.types.Scene.TransparentMaterialPointer  = bpy.props.PointerProperty(type=bpy.types.Material)
+    bpy.types.Scene.CameraCollectionPointer = bpy.props.PointerProperty(type=bpy.types.Collection)
 
 
 def unregister():

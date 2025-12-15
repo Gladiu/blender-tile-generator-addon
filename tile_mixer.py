@@ -68,7 +68,7 @@ class TileMixerNodeOperator(bpy.types.Operator):
         new_node.location.y += 100
 
         new_node = node_object.new("FunctionNodeInputBool")
-        new_node.label = "enable_in_shadow_render"
+        new_node.label = "enable_in_collision_render"
 
         new_node = node_object.new("FunctionNodeInputBool")
         new_node.label = "enable_in_foreground_render"
