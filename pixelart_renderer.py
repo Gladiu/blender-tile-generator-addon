@@ -499,7 +499,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             prop_name = actions_mixer_row.prop_for_action_name
             # Setup Rendering Arrays
             action_name = actions_mixer_row.character_action_name
-            is_36fps_render = actions_mixer_row.is_36fps_render
+            is_attack_render = actions_mixer_row.is_attack_render
             is_animated = True
             current_prop = None
             if actions_mixer_row.prop_for_action_name != 'None':
@@ -513,20 +513,21 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 # Prepare physics animations
                 physics_animation = bpy.data.actions[action_name].copy()
                 physics_animation.name = "PREFIX_FOR_DELETION" + physics_animation.name
-                # Make animation take 3 times longer
-                for slot in physics_animation.slots:
-                    slot.select = True
-                    for i,curve in enumerate(physics_animation.fcurves):
-                        for j, kfp in enumerate(curve.keyframe_points):
-                            physics_animation.fcurves[i].keyframe_points[j].co_ui.x = kfp.co_ui.x * 3.0
-                            physics_animation.fcurves[i].keyframe_points[j].interpolation = 'BEZIER'
-                            #kfp.co.x = kfp.co.x * 3
-                    slot.select = False
-                physics_animation.frame_end = physics_animation.frame_end * 3
+                # Make animation take 3 times longer if requested
+                if self.scene.TripleAttackAnimationFrames == True:
+                    for slot in physics_animation.slots:
+                        slot.select = True
+                        for i,curve in enumerate(physics_animation.fcurves):
+                            for j, kfp in enumerate(curve.keyframe_points):
+                                physics_animation.fcurves[i].keyframe_points[j].co_ui.x = kfp.co_ui.x * 3.0
+                                physics_animation.fcurves[i].keyframe_points[j].interpolation = 'BEZIER'
+                                #kfp.co.x = kfp.co.x * 3
+                        slot.select = False
+                    physics_animation.frame_end = physics_animation.frame_end * 3
                 physics_animation_dictionary[action_name] = physics_animation
         
         # Decide how many render passes we will do 
-        render_types = ['Single Render']
+        render_types = ['Background']
         if bg_fg_enabled:
             render_types = ['Background', 'Foreground']
             # Reset Everything
@@ -573,7 +574,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
             for actions_mixer_row in self.actions_prop_coll:
                 action_name = actions_mixer_row.character_action_name
-                is_36fps_render = actions_mixer_row.is_36fps_render
+                is_attack_render = actions_mixer_row.is_attack_render
                 is_animated = True
                 current_prop = None
                 if actions_mixer_row.prop_for_action_name != 'None':
@@ -652,7 +653,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                                 else:
                                     render_prop_anim[current_prop.name][action_name] = cv2.vconcat([render_prop_anim[current_prop.name][action_name], hstrip])
                                 self._cleanup(self.output_tmp_tiles_directory, self.TILE_PREFIX)
-                                if is_36fps_render == True:
+                                if is_attack_render == True:
                                     # Now render same prop for physics calculations
                                     previous_action = render_object.animation_data.action 
                                     previous_frame_end = self.scene.frame_end
@@ -745,9 +746,9 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 create_json_from_dict(render_target_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
 
         if len(render_physics_prop_anim.keys()) > 0:
-            create_images_from_dict(render_physics_prop_anim, "_36fps.png", self.output_directory, max_render_length)
+            create_images_from_dict(render_physics_prop_anim, "_attack.png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_physics_prop_anim, bpy.data, self.scene, render_rotations, False, "_36fps", self.output_directory, max_render_length)
+                create_json_from_dict(render_physics_prop_anim, bpy.data, self.scene, render_rotations, False, "_attack", self.output_directory, max_render_length)
 
         if len(render_prop_anim.keys()) > 0:
             create_images_from_dict(render_prop_anim, ".png", self.output_directory, max_render_length)

@@ -25,6 +25,11 @@ def register():
         description="Output a json file explaining animation names, size and lenghts",
         default=True
     )
+    bpy.types.Scene.TripleAttackAnimationFrames = bpy.props.BoolProperty(
+        name="Triple FPS for attack animations",# Name is described in label above
+        description="",
+        default=False
+    )
 
 
 def unregister():
@@ -62,7 +67,7 @@ class ActionsMixerRow(bpy.types.PropertyGroup):
         items=_get_prop_names
     )
 
-    is_36fps_render: bpy.props.BoolProperty(
+    is_attack_render: bpy.props.BoolProperty(
         name="", # Name is described in label above
         description="Is this action eligible for 36fps",
         default=False
@@ -93,12 +98,13 @@ class ActionsMixerPanel(bpy.types.Panel):
         grid.label(text="")
         grid.label(text="Action name")
         grid.label(text="Prop name")
-        grid.label(text="Is 36fps render")
+        grid.label(text="Is attack animation")
         for member in ActionsPropColl:
             grid.prop(member, "character_action_name")
             grid.prop(member, "prop_for_action_name")
-            grid.prop(member, "is_36fps_render")
+            grid.prop(member, "is_attack_render")
 
+        layout.prop(context.scene, "TripleAttackAnimationFrames", text="Triple Attack Animation Frames") 
         layout.label(text="Wearable collection name")
         layout.prop(context.scene, "WearableCollectionPointer", text="")
         layout.label(text="Maximum Render Length")
