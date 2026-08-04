@@ -133,6 +133,13 @@ def set_holdout_to_object(object, holdout_state):
     else:
         object.is_holdout = holdout_state
 
+def set_hide_render_to_object(object, hide_render_state):
+    if object.type == 'ARMATURE':
+        for child in object.children:
+            child.hide_render = hide_render_state
+    else:
+        object.hide_render = hide_render_state
+
 def make_all_renders_same_width(render_array):
     # Shaping different sizes of strips to have same size
     max_w = 0
@@ -165,7 +172,8 @@ def setup_animations(scene, character_pointer, prop_pointer, animation_name):
 def reset_animations(object):
     object.animation_data.action = None
 
-def create_json_from_dict(input_dict, bpy_data, scene, rotations, has_fg_bg, affix_filename, output_path, image_length_limit):
+# Tripling animation length is used for physics
+def create_json_from_dict(input_dict,hexdata_dict, looping_animations, bpy_data, scene, rotations, has_fg_bg, affix_filename, output_path, image_length_limit, triple_animation_length):
     for file_name in input_dict.keys():
         output_dict = {}
         output_dict["frame_size_px"] = [0,0]
@@ -174,13 +182,21 @@ def create_json_from_dict(input_dict, bpy_data, scene, rotations, has_fg_bg, aff
         output_dict["rotations"] = rotations
         output_dict["has_foreground_and_background"] = has_fg_bg
         output_dict["data"] = {}
+        output_dict["texture_file"] = hexdata_dict[file_name]
         current_animation_index_x = 0
         current_animation_index_y = 0
         for action_name in input_dict[file_name].keys():
             if action_name == 'None':
                 continue
             output_dict["data"][action_name] = {}
-            output_dict["data"][action_name]["animation_length"] = bpy_data.actions[action_name].frame_end
+            animation_length_multiplier = 1
+            if triple_animation_length:
+                animation_length_multiplier = 3
+            output_dict["data"][action_name]["animation_length"] = bpy_data.actions[action_name].frame_end * animation_length_multiplier
+
+            is_looping = action_name in looping_animations
+            output_dict["data"][action_name]["is_looping"] = is_looping
+
             current_action_height = 0
             strip =  np.asarray(input_dict[file_name][action_name])
             current_action_height, w, d = strip.shape
@@ -200,7 +216,7 @@ def create_json_from_dict(input_dict, bpy_data, scene, rotations, has_fg_bg, aff
             json.dump(output_dict, fp, indent=4)
 
 def create_images_from_dict(input_dict,affix_filename, output_path, max_file_length):
-
+    output_dict = {}
     for file_name in input_dict.keys():
         final_image = []
         max_strip_w = 0
@@ -244,6 +260,11 @@ def create_images_from_dict(input_dict,affix_filename, output_path, max_file_len
         out_file_name = str(file_name) + affix_filename
         #final_image = np.asarray(final_image)
         cv2.imwrite(os.path.join(output_path, out_file_name), final_image)
+
+        with open(os.path.join(output_path, out_file_name),'rb') as f:
+            hexdata = f.read().hex()
+            output_dict[file_name] = deepcopy(hexdata)
+    return output_dict
     
 def extend_image_with_blank_to_size(image, desired_size):
     strip =  np.asarray(image)
@@ -492,6 +513,8 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
         render_physics_prop_anim = {} # Prop doing animation on its own
         render_wearable = {}
 
+        looping_animations = [] # If animation is looping add it to this array
+
         # Prepare Props animation
         # - Hide prop
         bpy.context.scene.PropCollectionPointer.hide_render = True
@@ -575,10 +598,14 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
             for actions_mixer_row in self.actions_prop_coll:
                 action_name = actions_mixer_row.character_action_name
                 is_attack_render = actions_mixer_row.is_attack_render
+                is_looping = actions_mixer_row.is_looping
                 is_animated = True
                 current_prop = None
                 if actions_mixer_row.prop_for_action_name != 'None':
                     current_prop = bpy.data.objects[actions_mixer_row.prop_for_action_name]
+                
+                if is_looping:
+                    looping_animations.append(action_name)
 
                 setup_animations(self.scene, render_object, None, action_name)
 
@@ -635,6 +662,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                                 # Set things up for prop rendering
                                 set_object_scale_to_one(current_prop)
                                 set_holdout_to_object(render_object, True)
+
                                 current_prop.hide_render = False
                                 setup_animations(self.scene, render_object, current_prop, action_name)
 
@@ -660,6 +688,9 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
 
                                     current_prop.hide_render = False
                                     setup_animations(self.scene, render_object, current_prop, physics_animation_dictionary[action_name].name)
+                                    # For physics we dont want anything hiding physics object
+                                    set_holdout_to_object(render_object, False)
+                                    set_hide_render_to_object(render_object, True)
 
                                     bpy.ops.render.render(
                                         animation=is_animated,
@@ -669,6 +700,7 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                                         scene=''
                                     )
 
+                                    set_hide_render_to_object(render_object, False)
                                     render_object.animation_data.action = previous_action
                                     self.scene.frame_end = previous_frame_end 
                                     hstrip = combine_frames(self.output_tmp_tiles_directory, self.TILE_PREFIX)
@@ -735,30 +767,36 @@ class EMET_OT_render_tiles_operator(bpy.types.Operator):
                 prop_name = actions_mixer_row.prop_for_action_name
                 if prop_name != 'None': 
                     set_object_scale_to_one(bpy.data.objects[prop_name])
+
         if len(render_target.keys()) > 0:
-            create_images_from_dict(render_target, ".png", self.output_directory, max_render_length)
+            hex_data_dict = {}
+            hex_data_dict = create_images_from_dict(render_target, ".png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_target, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+                create_json_from_dict(render_target,hex_data_dict, looping_animations, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length, False)
 
         if len(render_target_prop_anim.keys()) > 0:
-            create_images_from_dict(render_target_prop_anim, ".png", self.output_directory, max_render_length)
+            hex_data_dict = {}
+            hex_data_dict = create_images_from_dict(render_target_prop_anim, "_without_prop.png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_target_prop_anim, bpy.data, self.scene, render_rotations, bg_fg_enabled, "", self.output_directory, max_render_length)
+                create_json_from_dict(render_target_prop_anim, hex_data_dict, looping_animations, bpy.data, self.scene, render_rotations, bg_fg_enabled, "_without_prop", self.output_directory, max_render_length, False)
 
         if len(render_physics_prop_anim.keys()) > 0:
-            create_images_from_dict(render_physics_prop_anim, "_attack.png", self.output_directory, max_render_length)
+            hex_data_dict = {}
+            hex_data_dict = create_images_from_dict(render_physics_prop_anim, "_physics_render.png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_physics_prop_anim, bpy.data, self.scene, render_rotations, False, "_attack", self.output_directory, max_render_length)
+                create_json_from_dict(render_physics_prop_anim, hex_data_dict, looping_animations, bpy.data, self.scene, render_rotations, False, "_physics_render", self.output_directory, max_render_length, True)
 
         if len(render_prop_anim.keys()) > 0:
-            create_images_from_dict(render_prop_anim, ".png", self.output_directory, max_render_length)
+            hex_data_dict = {}
+            hex_data_dict = create_images_from_dict(render_prop_anim, "_prop_alone.png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_prop_anim, bpy.data, self.scene, render_rotations, False, "", self.output_directory, max_render_length)
+                create_json_from_dict(render_prop_anim, hex_data_dict, looping_animations, bpy.data, self.scene, render_rotations, False, "_prop_alone", self.output_directory, max_render_length, False)
 
         if len(render_wearable.keys()) > 0:
-            create_images_from_dict(render_wearable, ".png", self.output_directory, max_render_length)
+            hex_data_dict = {}
+            hex_data_dict = create_images_from_dict(render_wearable, "_wearable.png", self.output_directory, max_render_length)
             if export_info_json:
-                create_json_from_dict(render_wearable, bpy.data, self.scene, render_rotations, False, "", self.output_directory, max_render_length)
+                create_json_from_dict(render_wearable, hex_data_dict, looping_animations, bpy.data, self.scene, render_rotations, False, "_wearable", self.output_directory, max_render_length, False)
             
         # Now we will delete unused actions:
         for key in bpy.data.actions.keys():

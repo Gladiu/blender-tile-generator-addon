@@ -73,6 +73,12 @@ class ActionsMixerRow(bpy.types.PropertyGroup):
         default=False
     )
 
+    is_looping: bpy.props.BoolProperty(
+        name="", # Name is described in label above
+        description="Is this action eligible for 36fps",
+        default=False
+    )
+
 
 class ActionsMixerPanel(bpy.types.Panel):
     bl_label = "Actions Mixer Panel"
@@ -86,9 +92,10 @@ class ActionsMixerPanel(bpy.types.Panel):
         layout = self.layout
         ActionsPropColl = context.scene.ActionsPropColl
 
-        grid = layout.grid_flow(row_major=True, columns=3, align=True)
+        grid = layout.grid_flow(row_major=True, columns=4, align=True)
         grid.label(text="Object name")
         grid.label(text="Props collection name (Cant be null)")
+        grid.label(text="")
         grid.label(text="")
         grid.prop(context.scene, "CharacterPointer", text="")
         grid.prop(context.scene, "PropCollectionPointer", text="")
@@ -96,13 +103,16 @@ class ActionsMixerPanel(bpy.types.Panel):
         row.operator(ActionsMixerAddRow.bl_idname, text="Add row", icon="ADD")
         row.operator(ActionsMixerRemoveRow.bl_idname, text="Remove row", icon="REMOVE")
         grid.label(text="")
+        grid.label(text="")
         grid.label(text="Action name")
         grid.label(text="Prop name")
         grid.label(text="Is attack animation")
+        grid.label(text="Is looping")
         for member in ActionsPropColl:
             grid.prop(member, "character_action_name")
             grid.prop(member, "prop_for_action_name")
             grid.prop(member, "is_attack_render")
+            grid.prop(member, "is_looping")
 
         layout.prop(context.scene, "TripleAttackAnimationFrames", text="Triple Attack Animation Frames") 
         layout.label(text="Wearable collection name")
